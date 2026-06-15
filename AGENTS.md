@@ -40,8 +40,15 @@ Social T2 [11-12/2026] 3 cam (overhead + 2 ego), cross-attn
 - CfC ko kịp error accumulation ở T=4 → đánh giá CfC đúng bản chất
 - Fair comparison giữa các architecture mới ra novelty thật
 
+## ⚖️ Nguyên tắc thiết kế: Tỉ lệ hybrid luôn 1:1
+- **Mọi architecture hybrid (CfC+Attn, Mamba+Attn) phải giữ tỉ lệ CfC:Mamba ≈ Attention ≈ 1:1**
+- Lý do: Attention chịu trách nhiệm spatial feature extraction, temporal model (CfC/Mamba) chịu trách nhiệm động học
+- 1:1 = cân bằng giữa 2 nhiệm vụ, ko thằng nào áp đảo thằng nào
+- Config hiện tại: backbone_units=384 → CfC=764K, Attention=787K → ratio ≈ 0.97:1 ≈ 1:1 ✅
+- Nếu V2 Mamba thay CfC: giữ tỉ lệ params tương đương CfC cũ
+
 ## V1 Plan chốt
-- **Arch:** 6×{Self-Attn(AdaLN) → CfC(ODE)}, 15.5M params
+- **Arch:** 6×{Self-Attn(AdaLN) → CfC(ODE)}, ~15.5M params
   - Attention: 28% predictor params (2.36M), Softmax (ko Linear), heads=8, dim_head=64
   - CfC(ODE): 51% predictor params (4.20M), backbone_units=384, cfc_hidden=256
   - AdaLN: 12%, còn lại là pos_embed + proj
