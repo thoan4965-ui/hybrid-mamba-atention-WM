@@ -466,6 +466,21 @@ def exp_config(cfg):
 - **V2 Mamba:** novelty cao hơn, rủi ro cao hơn, cần ~$30-60 + 3-5 tuần.
 - **Sáng tạo trẻ** = side quest, ko ảnh hưởng main plan, có giải là lời.
 
+### [2026-06-15] — Kế hoạch tương lai: λ sweep RTX 5080 ngày 21/6
+
+* **Trạng thái:** 📅 Plan (chờ budget)
+
+**Lịch:**
+- Hôm nay → 21/6: Viết báo cáo Sáng tạo trẻ (deadline 30/6)
+- **Chủ nhật 21/6:** Có budget ~230-270k → thuê Vast RTX 5080
+- Chạy λ sweep với config:
+  - `++trainer.precision=bf16-mixed` (5080 có BF16 native)
+  - `++loader.num_workers=6` (match LeWM paper)
+  - Batch 128, prefetch_factor=3, persistent_workers=True (giữ nguyên)
+  - λ=0.01, 0.05 (mỗi cái ~4-6h × $0.175 ≈ $0.70-1.05)
+  - Nếu còn budget: thêm λ=0.09
+- BF16 native → SIGReg ko overflow → lần đầu test CfC với precision đúng
+
 ### [2026-06-15] — 🔑 BÀI HỌC XƯƠNG MÁU: Ko tìm thông số tối ưu, hãy so sánh kiến trúc công bằng
 
 * **Tác giả:** Human (sau nhiều thời gian + tiền bạc)
