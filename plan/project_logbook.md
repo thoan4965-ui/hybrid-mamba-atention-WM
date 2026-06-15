@@ -567,6 +567,95 @@ def exp_config(cfg):
 | Bản | Mô tả | Code | Config chính | Kết quả |
 |---|---|---|---|---|
 | **V0** | Robot thật bionic hand 8-DOF, fork LeWM paper | `le-wm-vo/`, `code-new/` | embed_dim=96, T=4, AR+CfC | ✅ Grasp thật, drift CfC 34× AR |
+| **V1** | Hybrid CfC+Attention — **Sai lầm T=16** | `le-wm-v1/` (gốc) | T=16, heads=8, NO denoiser, backbone=384, batch=128, L40S | **78%** (budget=50). **6%** (budget=150) |
+| **V1.1** | Denoiser + λ sweep + **Học được bài học T=4** | `le-wm-v1/` (hiện tại) | T=4, heads=16, có denoiser, λ sweep | 🔄 Chưa chạy — chờ 21/6 5080 |
+| **V2** | Mamba predictor (tương lai) | 📅 | T=4, giữ Attention, Mamba thay CfC | 📅 |
+| **Social** | Multi-robot overhead cam | 📅 | T=4, CfC/Mamba, cross-attn | 📅 |
+
+**KẾT QUẢ EVAL V1 T=16 (budget=150, goal_offset=100):**
+- Success rate: **6%** (3/50 episodes)
+- CEM solve: ~120s/lần → 30 solves × 50 episodes ≈ rất chậm
+- Kết luận: CfC ODE hidden state không thể handle rollout dài 150 steps — error accumulation giết chết success rate
+- T=4 eval ở budget=50 (78%) là artificial good — vì budget quá nhỏ, CfC chưa kịp tích lũy lỗi
+- Đây là proof mạnh nhất cho việc cần V2 Mamba (ko ODE hidden state)
+| **V1** | Hybrid CfC+Attention — **Sai lầm T=16** | `le-wm-v1/` (gốc, commit cũ) | T=16, heads=8, **NO denoiser**, backbone=384, cfc_hidden=256, batch=128, L40S bf16 | **78%** (eval budget=50) | budget=50 → đang chạy budget=150 |
+| **V1.1** | Denoiser + λ sweep + T=4 | `le-wm-v1/` (hiện tại) | T=4, heads=16, **có denoiser**, backbone=384, cfc_hidden=256, λ sweep | 🔄 Chưa chạy — chờ 21/6 5080 | budget=150 |
+| **V2** | Mamba predictor | 📅 | T=4, Mamba thay CfC, giữ Attention | 📅 | — |
+
+**CẤU HÌNH REBUILD V1 (cho eval T=16 — lưu lại để sau này ko mò lại):**
+```json
+{
+  "predictor": {"num_frames": 15, "heads": 8, "dim_head": 64, "depth": 6,
+    "cfc_hidden": 256, "backbone_layers": 2, "backbone_units": 384,
+    "dropout": 0.1, "emb_dropout": 0.0},
+  "projector": {"input_dim": 192, "hidden_dim": 2048, "output_dim": 192, "norm": "BatchNorm1d"},
+  "denoiser": "KHÔNG CÓ — khi load thì thêm denoiser = Identity",
+  "action_encoder": {"input_dim": 10, "emb_dim": 192}
+}
+```
+- Checkpoint gốc: `hhian/checkpoints/checkpoints/hybrid_tworoom/ep_10/weights_epoch_10.pt` (62MB)
+- Load: build model tay, `load_state_dict(sd_cleaned, strict=False)`, thêm dummy denoiser keys
+- Eval: `eval.py ++eval.eval_budget=150 ++eval.goal_offset_steps=100 ++world.max_episode_steps=300`
+- **Warning:** rollout history_size phải set = 15 (ko dùng default 3) để CfC dùng T=16 thật
+
+**CẤU HÌNH EVAL PAPER (LeWM 2026):**
+| Task | eval_budget | goal_offset | max_episode_steps |
+|---|---|---|---|
+| TwoRoom | 150 | 100 | 300 |
+| Push-T | 50 | 25 | 100 |
+| Cube (OGBench) | 50 | 25 | 100 |
+| Reacher | 50 | 25 | 100 |
+
+### [2026-06-15] — 🔥 HIỂU LẦM SÂU SẮC VỀ CfC SPEED + MAMBA vs CfC (SỬA LẠI)
+
+* **Hiểu lầm 1:** "CfC tuần tự qua T bước → chậm hơn AR." → **SAI.**
+* **Sự thật:** CfC (Hasani et al. 2022) là closed-form continuous-time model — **không cần ODE solver.** Paper: complexity = O(K̃) — exogenous input time steps. KHÔNG phải O(T·d²) như RNN. Tôi viết O(T·d²) là sai.
+* **Hiểu lầm 2:** "Mamba nhanh hơn CfC" → **SAI. KHÔNG có paper nào so sánh CfC vs Mamba.** Cả 2 đều O(T). Tôi tự bịa ra kết luận này.
+* **Sự thật:** Mamba lợi thế ở **rollout stability** (selective SSM ko có ODE hidden state → ko error accumulation), không phải speed. CfC đã đủ nhanh rồi.
+* **CfC nhanh hơn Neural ODE/LTC** 100-5000× vì ko cần solver (confirmed bởi paper).
+* **Cả CfC và Mamba đều bị encoder (TinyViT 760M FLOPs) khống chế.** Temporal cost của CfC (~0.2M FLOPs) = 0.03% encoder cost.
+
+**Kết luận:**
+- Encoder (TinyViT) là bottleneck tuyệt đối (~98-99% FLOPs)
+- Temporal model (CfC, Mamba, AR, Attention) khác biệt không đáng kể về tốc độ
+- Chọn temporal model dựa trên **quality / stability**, không dựa trên speed
+- V2 (Mamba) được chọn vì rollout stability cho Social phase (T cao), không vì speed
+- **Không tái phạm:** viết "Mamba > CfC" về speed nữa
+
+### [2026-06-15] — ⭐ BÀI HỌC CỐT LÕI: Lý thuyết là khó nhất, đừng im lặng khi không hiểu
+
+* **Tác giả:** Human — đúc kết sau nhiều sai lầm
+* **Mức độ:** ⭐ **QUAN TRỌNG NHẤT — áp dụng cho mọi quyết định từ giờ**
+
+**Quy trình 3 chân (bắt buộc cho mọi kết luận):**
+1. **📐 Lý thuyết** — Đọc paper kỹ, hiểu bản chất toán học. Nếu không đọc được số liệu / bảng biểu, **hỏi user**, đừng im lặng giả vờ hiểu.
+2. **📄 Paper & Số liệu** — Trích dẫn chính xác, không suy diễn. Phân biệt "paper nói" vs "tôi suy ra".
+3. **🧪 Thực nghiệm** — Chạy thử, đo đạc. Lý thuyết vững → thực nghiệm khỏe.
+
+**Các lỗi đã mắc do vi phạm quy tắc này:**
+- ❌ **CfC = RNN** — Viết "CfC O(T·d²)" mà không đọc paper CfC. Paper nói CfC là closed-form, complexity O(K̃).
+- ❌ **Mamba > CfC về speed** — Tự suy diễn, không paper nào so sánh. Thực tế: cả 2 đều O(T), khác biệt không đáng kể.
+- ❌ **T cao hơn tốt hơn** — Không đọc kỹ LeWM paper. Paper dùng T=4 cho tất cả.
+- ❌ **Attention lọc nhiễu** — Suy luận sai bản chất. Attention = weighted sum, noise isotropic → không filter được.
+- ❌ **SIGReg over-regularization** — Đổ tại "λ quá cao". Thực tế: CfC (stateful) vs FFN (stateless) mới là gốc.
+
+**Luật:** Nếu thiếu 1 trong 3 chân → kết luận chưa chắc chắn → ghi rõ "chưa biết, cần test / đọc paper thêm".
+
+**CẤU HÌNH TRAIN V1.1 (Colab T4 / Kaggle / RTX 5080 — hiện tại):**
+```json
+{
+  "predictor": {"num_frames": 3, "heads": 16, "dim_head": 64, "depth": 6,
+    "cfc_hidden": 256, "backbone_layers": 2, "backbone_units": 384,
+    "dropout": 0.1, "emb_dropout": 0.0},
+  "projector": {"input_dim": 192, "hidden_dim": 2048, "output_dim": 192, "norm": "BatchNorm1d"},
+  "denoiser": {"dim": 192, "hidden": 2048, "residual": True},
+  "action_encoder": {"input_dim": 10, "emb_dim": 192}
+}
+```
+- Precision: `++trainer.precision=bf16-mixed` (5080) / `16-mixed` (T4)
+- History_size=3, num_preds=1 → T=4
+- λ sweep: 0.09, 0.05, 0.01
+- Eval: budget=150, goal_offset=100
 | **V1** | Hybrid CfC+Attention TwoRoom — **Sai lầm T=16** | `le-wm-v1/` (gốc) | **T=16**, heads=8, NO denoiser, batch=128, L40S | **78%** — eval T=4 (mismatch) |
 | **V1.1** | Denoiser + λ sweep + Học được bài học T=4 | `le-wm-v1/` (hiện tại) | **T=4**, heads=16, có denoiser, λ sweep | 🔄 Chưa chạy — chờ 21/6 5080 |
 | **V2** | Mamba predictor (tương lai) | 📅 | T=4, giữ Attention, Mamba thay CfC | 📅 |
