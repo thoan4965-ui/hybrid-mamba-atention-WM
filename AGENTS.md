@@ -10,6 +10,13 @@ Mọi kết luận phải đủ: **Lý thuyết (Theory) + Paper/Data + Thực n
 2. **Chọn đường tối ưu bền vững** — ko chỉ "chạy được là được". Chọn giải pháp robust, maintain được lâu dài, ko technical debt.
 3. **Mơ hồ = thiếu data** — ko thể kết luận chắc chắn = thiếu thông tin. Nói thẳng "chưa đủ data để kết luận, cần X". Ko suy diễn, ko bịa.
 
+### ⚠️ Lý thuyết là quan trọng nhất
+**Đọc kỹ paper gốc, hiểu bản chất toán học trước khi code hay kết luận.**
+- Sai lầm lớn nhất đến từ thiếu hiểu biết lý thuyết: CfC ≠ RNN (CfC là closed-form), Mamba O(T) ≠ Attention O(T²), SIGReg ≠ MSE
+- Nếu không đọc được số liệu / bảng biểu / công thức → **hỏi user**, đừng im lặng giả vờ hiểu
+- Mỗi lần gặp architecture mới: đọc paper → tóm tắt toán học cốt lõi → verify với source code → mới đưa ra quyết định
+- Lịch sử lỗi: "CfC O(T·d²)" (tự bịa), "Mamba > CfC về speed" (ko có paper so sánh), "T=16 > T=4" (ko đọc LeWM paper kỹ) — tất cả đều do đọc lướt lý thuyết
+
 ### Áp dụng
 - Trước mỗi lệnh cài đặt: check CUDA+Torch, check wheel có sẵn ko, dataset có public ko
 - Trước mỗi train: verify config, data path, checkpoint resume
