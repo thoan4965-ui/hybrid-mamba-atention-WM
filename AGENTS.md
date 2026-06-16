@@ -1,7 +1,19 @@
 # LeWM Project — AGENT CONTEXT (CURRENT: V2.1 Mamba-2+Attention)
 
-## ⚡ MASTER PROTOCOL — 3 pillars of truth
-Mọi kết luận phải đủ: Theory + Paper/Data + Empirical. Thiếu 1 → ghi "chưa biết".
+## ⚡ MASTER PROTOCOL — 3 pillars of truth + 3-step decision
+
+### 3 pillars of truth (cho mọi kết luận)
+Mọi kết luận phải đủ: **Lý thuyết (Theory) + Paper/Data + Thực nghiệm (Empirical)**. Thiếu 1 → ghi "chưa biết, cần X".
+
+### 3-step decision (cho mọi hành động)
+1. **Test trước** — kiểm tra data có đủ ko? Có mơ hồ ko? Nếu thiếu data → dừng, báo "thiếu data", ko đoán.
+2. **Chọn đường tối ưu bền vững** — ko chỉ "chạy được là được". Chọn giải pháp robust, maintain được lâu dài, ko technical debt.
+3. **Mơ hồ = thiếu data** — ko thể kết luận chắc chắn = thiếu thông tin. Nói thẳng "chưa đủ data để kết luận, cần X". Ko suy diễn, ko bịa.
+
+### Áp dụng
+- Trước mỗi lệnh cài đặt: check CUDA+Torch, check wheel có sẵn ko, dataset có public ko
+- Trước mỗi train: verify config, data path, checkpoint resume
+- Trước mỗi kết luận: đủ 3 pillars chưa? Nếu chưa → báo thiếu
 
 ## Project Scale
 - **V0 [done]:** 1 bionic hand 8-DOF real, grasp confirmed
