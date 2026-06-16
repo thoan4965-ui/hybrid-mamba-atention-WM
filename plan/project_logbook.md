@@ -295,7 +295,7 @@ def exp_config(cfg):
 - Phase 3: Benchmark T1-T5 (1 ngày)
 - Phase 4: Báo cáo ISEF (2 ngày)
 - Augment sim: random camera góc, lighting, background, object color → zero-shot sim2real
-42. **🔥 CEM PLANNER THIẾU CONTEXT HISTORY — BUG HỦY DIỆT.** `robot_loop()` gọi `cem_planner()` với `start_img` (1 frame) nhưng KHÔNG truyền `context_emb` và `context_aemb`. CfC training: 3 history frames + teacher forcing. CEM inference: 1 frame + 0 history → CfC mất 2/3 context, hidden state rỗng → imagination cost cao 0.65 (0.0025 ở test). Bug này tồn tại từ ngày đầu viết robot_planner.py. Fix: capture + lưu 2 frame trước đó + actions → truyền làm context.
+42. **🔥 CEM CONTEXT HISTORY BUG (duplicate của #28).** Bug này xuất hiện 2 lần trong logbook. #28 giữ nguyên. #42 là duplicate — xem #28.
 
 ### CẦN NÉ (Rules từ tất cả bugs)
 1. **Không bao giờ** train/eval CfC với batch-style predict (nhiều frames 1 lúc)
