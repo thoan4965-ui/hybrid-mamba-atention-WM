@@ -10,6 +10,7 @@ import torch
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
+from download_data import ensure_dataset
 from module import SIGReg
 from utils import get_column_normalizer, get_img_preprocessor, SaveCkptCallback
 
@@ -50,8 +51,14 @@ def run(cfg):
     ##       dataset       ##
     #########################
 
+    # Tự động tải dataset từ HF nếu chưa có
     dataset_cfg = OmegaConf.to_container(cfg.data.dataset, resolve=True)
     dataset_name = dataset_cfg.pop("name")
+    # Map .h5 name -> task name for download_data
+    task_map = {"tworoom.h5": "tworoom", "pusht_expert_train.h5": "pusht",
+                "reacher.h5": "reacher", "cube_single_expert.h5": "cube"}
+    if dataset_name in task_map:
+        ensure_dataset(task_map[dataset_name])
     cache_dir = os.environ.get("LOCAL_DATASET_DIR", None)
     dataset = swm.data.load_dataset(
         dataset_name, transform=None, cache_dir=cache_dir, **dataset_cfg
