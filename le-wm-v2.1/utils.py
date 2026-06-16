@@ -1,3 +1,7 @@
+import os
+import shutil
+from pathlib import Path
+
 import numpy as np
 import torch
 from stable_pretraining import data as dt
@@ -34,11 +38,13 @@ def get_column_normalizer(dataset, source: str, target: str):
 class SaveCkptCallback(Callback):
     """Callback to save model checkpoint after each epoch using save_pretrained."""
 
-    def __init__(self, run_name, cfg, epoch_interval: int = 1):
+    def __init__(self, run_name, cfg, run_dir, epoch_interval=1, subdir=None):
         super().__init__()
         self.run_name = run_name
         self.cfg = cfg
+        self.run_dir = run_dir
         self.epoch_interval = epoch_interval
+        self.subdir = subdir or run_name
 
     def on_train_epoch_end(self, trainer, pl_module):
         super().on_train_epoch_end(trainer, pl_module)
@@ -58,3 +64,41 @@ class SaveCkptCallback(Callback):
             config=self.cfg,
             filename=f'weights_epoch_{epoch}.pt',
         )
+        # Copy .pt vào run_dir/ để gom chung với .ckpt
+        cache_home = os.environ.get("STABLEWM_HOME", str(Path.home() / ".stable_worldmodel"))
+        src = Path(f"{cache_home}/checkpoints/{self.run_name}/weights_epoch_{epoch}.pt")
+        dst = self.run_dir / f"weights_epoch_{epoch}.pt"
+        if src.exists():
+            shutil.copy2(str(src), str(dst))
+        self._upload_to_hf(epoch)
+
+    def _upload_to_hf(self, epoch):
+        hf_token = os.environ.get("HF_TOKEN")
+        if not hf_token:
+            return
+        from huggingface_hub import HfApi
+        api = HfApi(token=hf_token)
+
+        base = f"checkpoints/{self.subdir}/{self.run_name}/ep_{epoch}"
+
+        # Upload .pt
+        pt_path = self.run_dir / f"weights_epoch_{epoch}.pt"
+        if pt_path.exists():
+            api.upload_file(
+                path_or_fileobj=str(pt_path),
+                path_in_repo=f"{base}/weights_epoch_{epoch}.pt",
+                repo_id="hhian/checkpoints",
+                repo_type="model",
+            )
+            print(f"✅ Uploaded .pt ep{epoch}")
+
+        # Upload .ckpt (lấy file mới nhất)
+        for ckpt in sorted(self.run_dir.glob("*.ckpt"), reverse=True):
+            api.upload_file(
+                path_or_fileobj=str(ckpt),
+                path_in_repo=f"{base}/weights.ckpt",
+                repo_id="hhian/checkpoints",
+                repo_type="model",
+            )
+            print(f"✅ Uploaded .ckpt ep{epoch}")
+            break

@@ -118,7 +118,9 @@ def run(cfg):
         OmegaConf.save(cfg, f)
 
     object_dump_callback = SaveCkptCallback(
-        run_name=cfg.output_model_name, cfg=cfg.model, epoch_interval=1,
+        run_name=cfg.output_model_name, cfg=cfg.model,
+        run_dir=run_dir, epoch_interval=1,
+        subdir=os.environ.get("SUB_DIR") or cfg.get("subdir") or "",
     )
 
     trainer = pl.Trainer(
