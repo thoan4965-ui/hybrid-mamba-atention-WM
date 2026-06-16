@@ -32,7 +32,7 @@ import os
 from pathlib import Path
 import stable_worldmodel as swm
 d = Path(swm.data.utils.get_cache_dir(sub_folder='checkpoints'))
-c = sorted(d.rglob('*_weights.ckpt'), key=os.path.getmtime)
+c = sorted(d.rglob('*_epoch_*.pt'), key=os.path.getmtime)
 print(str(c[-1].parent) if c else str(d))
 ")
 python eval.py task=$TASK policy=$CKPT
