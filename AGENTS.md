@@ -30,8 +30,9 @@ Mọi kết luận phải đủ: **Lý thuyết (Theory) + Paper/Data + Thực n
 - **Social T2 [future]:** 3 cam (overhead + 2 ego), cross-attn
 
 ## V2.1 Architecture
-- **6×{Self-Attn(AdaLN) → Mamba-2}**, T=4, heads=6, d_state=64
-- Attention:Mamba-2 ≈ 1.3:1 params (288K:221K)
+- **6×{Self-Attn(AdaLN) → Mamba-2}**, T=4, heads=16, d_state=256, expand=4
+- Attention:Mamba-2 ≈ 1.43:1 params (787K:550K per block)
+- Predictor 9.36M, total model 16.6M (≈ AR 10.6M predictor, ~15M total paper)
 - Mamba-2 (có wheel sẵn, ko build), Mamba-3 giữ trong module.py để tham khảo
 
 ## Strategy: Fair architecture comparison (fixed T=4)
