@@ -46,16 +46,19 @@ Mọi kết luận phải đủ: **Lý thuyết (Theory) + Paper/Data + Thực n
 4. 📅 Báo cáo Sáng tạo trẻ 30/6 (V0 + V2.1)
 5. 📅 ISEF tháng 9 (cần budget ~$72-120)
 
-## Rules từ bug
-1. **Resume:** `glob *.ckpt`, ko hardcode filename
-2. **HF upload:** `{subdir}/{run_name}/ep_{epoch}` — ko hardcode
-3. **Check CUDA+Torch trước cài wheel:** `python -c "import torch; print(f'{torch.__version__}, CUDA: {torch.version.cuda}')"`
-4. **Ko build source nếu có wheel:** causal-conv1d, mamba-ssm đều có wheel
-5. **Dataset .tar.zst → download + giải nén thủ công** (download_data.py)
-6. **Eval seed:** seed=3072 đồng bộ train
-7. **Precision:** bf16 trên GPU hỗ trợ
-8. **CEM context history bug:** phải truyền context_emb, ko dùng 1 frame
-9. **Ko tự bịa threshold/cơ chế** — phải có test thật
+## Rules từ bug (nghiêm ngặt — ko vi phạm)
+1. **Resume:** `glob *.ckpt`, ko hardcode filename. Lightning đặt tên `.ckpt` khác `output_model_name`.
+2. **HF upload:** `{subdir}/{run_name}/ep_{epoch}` — ko hardcode, ko env var.
+3. **Check CUDA+Torch trước cài wheel:** `python -c "import torch; print(f'{torch.__version__}, CUDA: {torch.version.cuda}')"`. Sai version → 404 wheel → mất $.
+4. **Ko build source nếu có wheel:** causal-conv1d, mamba-ssm đều có wheel 274-533 MB. Check release page trước, build chỉ khi ko có wheel.
+5. **Dataset .tar.zst → download + giải nén thủ công** (download_data.py). `stable-worldmodel` chưa hỗ trợ auto-detect `.h5` nếu thiếu `hdf5plugin`.
+6. **Eval seed:** seed=3072 đồng bộ train. Mọi task, mọi architecture.
+7. **Precision:** bf16 trên GPU hỗ trợ. Ko dùng fp16 trừ khi GPU ko hỗ trợ bf16.
+8. **CEM context history bug:** phải truyền `context_emb`, ko dùng 1 frame. CfC cần 3-frame history.
+9. **Ko tự bịa threshold/cơ chế** — phải có test thật. "cost < 0.05 là tốt" là bịa.
+10. **🔥 Check thư mục trước sửa/push — KHÔNG SỬA BỪA.** `ls`/`Get-ChildItem` xem cấu trúc file. Hiểu quan hệ: config nào → file nào → import nào → phụ thuộc module nào. Nếu ko rõ → hỏi user trước.
+11. **🔥 Kiểm tra format support trước dùng function.** `swm.data.load_dataset` chỉ hỗ trợ `lance, folder, lerobot, video`. HDF5 cần `hdf5plugin` + `HDF5Dataset` trực tiếp. Ko tin docs mù quáng — check source code.
+12. **🔥 Đủ 3 pillars (Theory + Paper + Empirical) cho mọi kết luận.** Thiếu 1 → ghi "chưa biết". Ko suy diễn, ko bịa.
 
 ## Budget
 - Vast RTX 5080: $0.175/h (đang dùng)

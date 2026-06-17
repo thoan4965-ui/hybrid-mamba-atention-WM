@@ -434,6 +434,29 @@ Hoàn thành taxonomy đầy đủ ngày 2026-06-16. Chi tiết trong session lo
 
 ## 📝 4. NHẬT KÝ THAY ĐỔI CHI TIẾT (CHANGELOG)
 
+### [2026-06-17] — V2.1 setup Vast + dataset fix + rules cleanup
+
+* **Người thực hiện:** AI Engineer
+* **Trạng thái:** ✅ Completed
+
+**Công việc đã làm:**
+1. Setup Vast RTX 5080 instance ($0.175/h) — clone code mới từ `thoan4965-ui/hybrid-cfc-atention-WM`
+2. Cài Mamba-2 wheel (533 MB) + causal-conv1d wheel (274 MB) — thành công
+3. Tạo `download_data.py` — auto tải + giải nén dataset từ HF (`quentinll/lewm-tworooms`)
+4. Fix dataset load error: thêm `hdf5plugin` + `format=hdf5` (HDF5 format trong `stable-worldmodel` yêu cầu `hdf5plugin` để register format)
+5. Thêm HF upload vào `SaveCkptCallback` — tự động đẩy `.pt` + `.ckpt` lên `hhian/checkpoints` mỗi epoch
+6. Fix eval command: tìm `*_epoch_*.pt` thay vì `*_weights.ckpt`
+7. Dọn AGENTS.md: rút từ 146 → 51 dòng, xóa V1.1 lỗi thời, thêm 3-step decision protocol
+8. Dọn memory: xóa ISEF entities (12 entity lẻ tẻ), fix CfC OOD gap 99.76x → 26x
+9. Merge duplicate CEM bug entries (#28 và #42)
+
+**Rules mới/thêm:**
+- **Check thư mục trước sửa/push:** `ls` xem cấu trúc file, hiểu quan hệ config→file→import trước khi edit
+- **Lý thuyết là quan trọng nhất:** đọc paper gốc, hiểu toán trước khi code/kết luận
+- **Ko build source nếu có wheel:** causal-conv1d 274 MB wheel, build từ source mất 5-10 phút
+
+**Chi phí Vast:** ~$0.35 (2h) cho debug dataset/build. Đã fix xong, sẵn sàng train chính thức.
+
 ### [2026-06-16] — ISEF Deep Research: Comprehensive 3-Year Analysis + World Model Gap Confirmed
 
 * **Người thực hiện:** AI Engineer
