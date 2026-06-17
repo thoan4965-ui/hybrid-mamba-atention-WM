@@ -303,22 +303,27 @@ def exp_config(cfg):
 - Augment sim: random camera góc, lighting, background, object color → zero-shot sim2real
 42. **🔥 CEM CONTEXT HISTORY BUG (duplicate của #28).** Bug này xuất hiện 2 lần trong logbook. #28 giữ nguyên. #42 là duplicate — xem #28.
 
-### CẦN NÉ (Rules từ tất cả bugs)
-1. **Không bao giờ** train/eval CfC với batch-style predict (nhiều frames 1 lúc)
-2. **Không dùng** `timespans=None` nếu muốn ODE advantage
-3. **Không so sánh** CfC với AR trên task short fixed-step — CfC lợi thế ở variable Δt và long rollout
-4. **Không lấy** AR evaluation code rồi sửa surface — CfC cần evaluation loop hoàn toàn khác
-5. **Check `num_frames=1`** trong config — CfC không phải Transformer
-6. **Không hardcode params** trong model_loader — đọc từ checkpoint header
-7. **Không import model_class rồi tự instantiate** — dùng hydra instantiate từ config gốc
-8. **Dataset phải trả sequences (T, H, W, C)**, không single frame. JEPA encode dùng `rearrange("b t ... → (b t) ...")` — cần dim T.
-9. **NHWC → NCHW trước khi vào Conv2d encoder.** JEPA encode flatten (B*T, H, W, C) nhưng TinyViT Conv2d expects (B, 3, H, W). Phải permute(0,1,4,2,3) trong forward.
-10. **Ko dùng torchvision v2 transforms trên NHWC data.** Chúng expect CHW. Nếu ko permute được, skip augmentation.
-11. **Config file trên Drive khác local.** Colab đọc config từ Drive — phải sync config trước khi train.
-12. **Pixel normalization phải đồng bộ train/eval.** Preload `.float()/255.0` hoặc load float32 từ H5. Ko để uint8 vào encoder.
-13. **🔥 CHECK CUDA + TORCH TRƯỚC, RỒI MỚI ĐƯA LỆNH CÀI.** `python -c "import torch; print(f'Torch: {torch.__version__}, CUDA: {torch.version.cuda}')"` — bắt buộc trước mọi session. Dùng kết quả để chọn wheel đúng (cu12torch2.10, cu13torch2.10, etc.). Sai version → 404 wheel → mất thời gian.
-14. **🔥 KHÔNG BUILD SOURCE NẾU CÓ WHEEL.** `causal-conv1d` build từ source (29KB tar.gz) mất 5-10 phút compile CUDA. Wheel có sẵn cho mọi CUDA+Torch combo: `https://github.com/Dao-AILab/causal-conv1d/releases/`. `causal_conv1d-1.6.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl` là 30 giây. Luôn check release page trước, nếu ko có wheel thì mới build.
-15. **🔥 THỜI GIAN TRÊN VAST = TIỀN.** 5 phút build wheel = ~$0.015 (RTX 5080 $0.175/h). Mỗi lần destroy-recreate mất thêm 2-3 phút setup. Tổng thiệt hại do build không cần thiết: ~$0.05-0.10 + 15-30 phút chờ. Nhỏ nhưng tránh được.
+### CẦN NÉ (Rules từ tất cả bugs — ghi đè khi có update)
+1. **Resume:** `glob *.ckpt`, ko hardcode filename. Lightning đặt `.ckpt` khác `output_model_name`.
+2. **HF upload:** `{subdir}/{run_name}/ep_{epoch}` — ko hardcode, ko env var.
+3. **Check CUDA+Torch trước cài wheel:** `python -c "import torch; print(torch.__version__, torch.version.cuda)"`. Sai version → 404 wheel → mất $ + thời gian.
+4. **Ko build source nếu có wheel:** causal-conv1d, mamba-ssm đều có wheel. Check release page trước.
+5. **Dataset .tar.zst → download + giải nén thủ công** (download_data.py). `swm.data.load_dataset` chỉ hỗ trợ lance/folder/lerobot/video. H5 cần `hdf5plugin`.
+6. **Eval seed:** seed=3072 đồng bộ train. Mọi task, mọi architecture.
+7. **Precision:** bf16 trên GPU hỗ trợ. Ko dùng fp16 khi có bf16.
+8. **CEM context history bug:** phải truyền `context_emb`, CfC cần 3-frame history.
+9. **Ko tự bịa threshold/cơ chế** — phải có test thật.
+10. **Check thư mục trước sửa/push** — hiểu quan hệ config→file→import→module trước khi edit.
+11. **Kiểm tra format support trước dùng function** — ko tin docs mù quáng, check source code.
+12. **Đủ 3 pillars cho mọi kết luận.** Thiếu 1 → ghi "chưa biết".
+13. **Eval: mọi task budget=50, goal_offset=25.** TwoRoom từng sai 150/100.
+14. **Wrapper try/except cho mọi I/O** — training ko được dừng vì lỗi phụ.
+15. **Kiểm tra token/dịch vụ trước session** — `api.whoami()` trước, ko đợi runtime.
+16. **Không so sánh CfC với AR trên task short fixed-step** — CfC lợi thế ở variable Δt và long rollout.
+17. **Dataset phải trả sequences (T, H, W, C)**, không single frame.
+18. **Pixel normalization phải đồng bộ train/eval** — float32/255.0.
+19. **Ko cài torch/torchvision trên Colab** — đã có sẵn.
+20. **Camera cần 30s stabilize** — auto-exposure/white balance cần thời gian.
 
 ### Bài học tổng quát (06/2026)
 
