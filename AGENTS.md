@@ -35,8 +35,9 @@ Mọi kết luận phải đủ: **Lý thuyết (Theory) + Paper/Data + Thực n
 - Mamba-2 (có wheel sẵn, ko build), Mamba-3 giữ trong module.py để tham khảo
 
 ## Strategy: Fair architecture comparison (fixed T=4)
-- LeWM paper dùng T=4 cho cả 4 benchmark
+- LeWM paper dùng **T=4** cho cả 4 benchmark
 - Mọi architecture dùng **cùng T=4, batch=128, seed=3072**
+- **Eval: mọi task budget=50, goal_offset=25** (LeWM paper config)
 - Ai beat LeWM ở T=4 → architectural improvement thật
 
 ## Priorities
@@ -59,6 +60,7 @@ Mọi kết luận phải đủ: **Lý thuyết (Theory) + Paper/Data + Thực n
 10. **🔥 Check thư mục trước sửa/push — KHÔNG SỬA BỪA.** `ls`/`Get-ChildItem` xem cấu trúc file. Hiểu quan hệ: config nào → file nào → import nào → phụ thuộc module nào. Nếu ko rõ → hỏi user trước.
 11. **🔥 Kiểm tra format support trước dùng function.** `swm.data.load_dataset` chỉ hỗ trợ `lance, folder, lerobot, video`. HDF5 cần `hdf5plugin` + `HDF5Dataset` trực tiếp. Ko tin docs mù quáng — check source code.
 12. **🔥 Đủ 3 pillars (Theory + Paper + Empirical) cho mọi kết luận.** Thiếu 1 → ghi "chưa biết". Ko suy diễn, ko bịa.
+13. **🔥 Eval config đúng LeWM paper: mọi task budget=50, goal_offset=25.** TwoRoom từng để sai 150/100 vì ko đọc paper kỹ. Budget 50 × frameskip 5 = 250 env steps — đủ cho TwoRoom. Chỉ tăng nếu benchmark chứng minh thiếu.
 
 ## Budget
 - Vast RTX 5080: $0.175/h (đang dùng)

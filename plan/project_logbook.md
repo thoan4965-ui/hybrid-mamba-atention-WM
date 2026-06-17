@@ -436,6 +436,8 @@ Hoàn thành taxonomy đầy đủ ngày 2026-06-16. Chi tiết trong session lo
 
 ### [2026-06-17] — V2.1 setup Vast + dataset fix + rules cleanup
 
+* **Sửa lỗi eval config TwoRoom:** budget=150, goal=100 → **budget=50, goal=25** theo đúng LeWM paper (mọi task budget=50, goal_offset=25). Sai sót do đọc lướt paper — ghi vào rule #13. **⚠️ Ảnh hưởng:** budget 50 × frameskip 5 = 250 env steps — vẫn đủ cho TwoRoom navigation. Nếu thiếu, sau đó mới tăng.
+
 * **Người thực hiện:** AI Engineer
 * **Trạng thái:** ✅ Completed
 
