@@ -69,8 +69,34 @@ Mọi kết luận phải đủ: **Lý thuyết (Theory) + Paper/Data + Thực n
 - Colab T4: free (nhiều acc)
 - Kaggle GPU: free (nhiều acc)
 
+## Session Protocol (bắt buộc mỗi session)
+
+### 1. Session start — Load context
+```python
+# Tự động làm ngay khi session bắt đầu
+skill name="logbook-manager"           # load skill
+memory_read_graph                       # load memory graph
+memory_search_nodes query="LeWM|CfC|V4|V5|dự_án"  # search context
+read "D:\ai_training\plan\project_logbook.md"  # đọc logbook (changelog + hypothesis mới)
+```
+Nếu quên → user nhắc "load memory" hoặc "đọc logbook".
+
+### 2. End of session — Rule review
+Trước khi kết thúc phiên, tự kiểm tra:
+- Quyết định nào vi phạm rule trong AGENTS.md? Nếu có → ghi vào logbook
+- Quyết định nào thiếu 1 trong 3 pillars (Theory + Paper + Empirical)? Nếu thiếu → bổ sung
+- Có thay đổi code/kiến trúc/quyết định nào cần logbook changelog không?
+- Có lỗi/sai lầm nào mới phát hiện cần thêm rule không?
+
+### 3. Pre-install checklist (trước mọi `pip install`)
+- `python -c "import torch; print(torch.__version__, torch.version.cuda)"`
+- Check wheel có sẵn ko (check release page trước)
+- Dataset có public ko? (check HF API)
+- Nếu ko có wheel → báo user, ko tự ý build
+
 ## Work Protocol
 - Output mỗi tool call
 - Ko sub-agent code
-- Manager → worker
+- Load memory + logbook đầu session (xem Session Protocol)
+- Cuối session: rule review + update changelog
 - Mày nói "dừng" → tao stop ngay
