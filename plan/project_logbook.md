@@ -432,6 +432,28 @@ Hoàn thành taxonomy đầy đủ ngày 2026-06-16. Chi tiết trong session lo
 
 ---
 
+## 📋 3c. CONFIG HIỆN TẠI (ghi đè — chỉ giữ 1 bản)
+
+| Tham số | Giá trị | Ghi chú |
+|---|---|---|
+| **Architecture** | Mamba-2+Attention | Option C |
+| **heads** | 16 | |
+| **d_state** | 256 | |
+| **expand** | 4 | |
+| **depth** | 6 | |
+| **T** | 4 | history_size=3, num_preds=1 |
+| **batch** | 128 | |
+| **lr** | 5e-5 | AdamW |
+| **seed** | 3072 | |
+| **precision** | bf16-mixed | |
+| **epochs** | 10 | |
+| **eval budget** | 50 | goal_offset=25 |
+| **Total params** | 16.6M | predictor 9.36M |
+| **Encoder** | ViT-tiny (vit_hf) | 5.5M |
+| **Loss** | MSE + SIGReg (λ=0.09) | |
+| **Mamba** | mamba-ssm v2.3.1, causal-conv1d v1.6.1.post4 | wheel |
+| **Dependencies** | torch 2.10.0+cu128, transformers 5.12.1 | CUDA 12.8 |
+
 ## 📝 4. NHẬT KÝ THAY ĐỔI CHI TIẾT (CHANGELOG)
 
 ### [2026-06-17] — Fix reproducibility seed + config Option C
