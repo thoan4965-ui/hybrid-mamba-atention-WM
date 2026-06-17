@@ -334,6 +334,18 @@ def exp_config(cfg):
 5. **MCP server cần native build → ko portable.** hypothesis-tracker-mcp cần better-sqlite3 → node-gyp → VS Studio → Windows fail. Kiểm tra dependency trước khi recommend.
 6. **Done gate sau mỗi task.** Rules → 3 pillars → research → git → logbook → clarity. Thiếu 1 = ko done.
 
+### Quy tắc báo cáo
+- **Số từ code / eval của mình:** ghi chính xác (vd: 86%, 43/50)
+- **Số từ paper:** chỉ trích từ bảng số, ko từ đồ thị (đồ thị khó đọc chính xác). Nếu ko có bảng → ghi "tham khảo: Figure X, ước lượng ~Y" — ko khẳng định.
+- **So sánh:** phải cùng T, cùng budget, cùng seed. Thiếu 1 yếu tố = so sánh ko công bằng.
+
+### Tiến độ hiện tại
+- **V0 [done]:** Robot bionic hand 8-DOF, grasp 100%, planning ~2s
+- **V1 [abandoned]:** Hybrid CfC+Attention TwoRoom 78% (T=16 budget=50)
+- **V2.1 [done]:** Mamba-2+Attention TwoRoom **86%** (Option C, T=4, budget=50)
+- **V2.1 [next]:** Push-T + Cube + Reacher — cần train thêm
+- **V3 [plan]:** Social overhead cam — sau V2.1
+
 ### Key Insights
 - CfC là RNN/ODE: nhận 1 frame + hidden state, predict 1 frame. Ko copy AR's batch predict.
 - Phase 1 build hidden state từ history, Phase 2 predict future — hidden state CARRY xuyên suốt
