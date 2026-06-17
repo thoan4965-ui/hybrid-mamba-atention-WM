@@ -441,7 +441,14 @@ Hoàn thành taxonomy đầy đủ ngày 2026-06-16. Chi tiết trong session lo
 
 **Công việc:**
 1. **Seed fix:** thêm `pl.seed_everything(cfg.seed)` vào `train.py` — trước đó stable-pretraining Manager ko đọc seed từ config, weight init + dropout + CUDA ops ngẫu nhiên mỗi lần chạy. Ảnh hưởng: reproducibility cho paper.
-2. **Config Option C:** heads=16, d_state=256, expand=4, depth=6 → predictor 9.36M (≈ AR 10.6M), tỉ lệ Attention:Mamba ≈ 1.43:1. Train lại từ epoch 0 trên Vast.
+2. **Config Option C:** heads=16, d_state=256, expand=4, depth=6.
+   - **So với cũ:** heads 6→16, d_state 64→256, expand 2→4
+   - **Params thực tế:** total 16.6M (predictor 9.36M, encoder 5.5M, projector×2 1.59M, action_enc 0.16M)
+   - **Tỉ lệ A:M:** 787K : 550K = 1.43:1
+   - **File weights:** 66.6 MB (so với LeWM 72.3 MB — do transformers 5.12.1 vs 5.6.2)
+   - **Training speed:** 4.53 it/s (so với cũ 4.75 — chậm nhẹ do model to hơn)
+   - **Epoch 0:** val/pred_loss=0.088, val/sigreg=56.25
+   - **Epoch 2:** val/pred_loss=**0.203** (giảm), val/sigreg=**6.91** (ổn định)
 3. **Thêm expand param** vào module.py (Mamba2Predictor → Mamba2Transformer → Mamba2ConditionalBlock) để configurable từ YAML.
 
 ### [2026-06-17] — HF upload fix try/except + rules nhấn mạnh
