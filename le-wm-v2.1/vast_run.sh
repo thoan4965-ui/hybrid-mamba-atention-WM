@@ -5,7 +5,7 @@
 
 set -euo pipefail
 TASK=${1:-tworoom}
-EPOCHS=${2:-100}
+EPOCHS=${2:-10}
 LR=5e-5
 BATCH=128
 SEED=3072
