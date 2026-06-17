@@ -89,6 +89,7 @@ def run(cfg):
     ##       model / optim      ##
     ##############################
 
+    pl.seed_everything(cfg.seed, workers=True)
     world_model = hydra.utils.instantiate(cfg.model)
 
     optimizers = {
