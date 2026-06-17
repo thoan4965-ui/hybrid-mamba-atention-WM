@@ -17,6 +17,15 @@ Mọi kết luận phải đủ: **Lý thuyết (Theory) + Paper/Data + Thực n
 - Mỗi lần gặp architecture mới: đọc paper → tóm tắt toán học cốt lõi → verify với source code → mới đưa ra quyết định
 - Lịch sử lỗi: "CfC O(T·d²)" (tự bịa), "Mamba > CfC về speed" (ko có paper so sánh), "T=16 > T=4" (ko đọc LeWM paper kỹ) — tất cả đều do đọc lướt lý thuyết
 
+### ⚡ Nguyên tắc tổng quát (từ bài học thực tế)
+
+1. **Không so sánh thiển cận.** Push-T ≠ TwoRoom. Mỗi task có trade-off riêng (spatial vs temporal, precision vs memory). Kết luận "cái này dễ hơn cái kia" là vô căn cứ.
+2. **Fair comparison phải match mọi biến.** Cùng T, cùng params, cùng budget, cùng seed. Nếu ko match → ko kết luận được kiến trúc nào tốt hơn.
+3. **Paper có thể sai hoặc mâu thuẫn.** Appendix có thể khác main text, repo config có thể khác paper. Luôn kiểm tra nhiều nguồn (paper + code + issues).
+4. **Ghi đè thay vì chồng chất.** Config, rules, dependencies — chỉ giữ 1 bản mới nhất. Lịch sử để git lo. Logbook gọn nhẹ, ko lẫn.
+5. **MCP/dependency cần kiểm tra build trước.** native code (node-gyp, CUDA build) cần toolchain phù hợp. Nếu ko có → chọn giải pháp khác.
+6. **Done gate sau mỗi task.** 6 điểm: rules → 3 pillars → research → git → logbook → clarity. Thiếu 1 = chưa xong.
+
 ### Áp dụng
 - Trước mỗi lệnh cài đặt: check CUDA+Torch, check wheel có sẵn ko, dataset có public ko
 - Trước mỗi train: verify config, data path, checkpoint resume
