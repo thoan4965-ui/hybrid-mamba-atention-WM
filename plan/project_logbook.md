@@ -476,68 +476,18 @@ Hoàn thành taxonomy đầy đủ ngày 2026-06-16. Chi tiết trong session lo
 | **Mamba** | mamba-ssm v2.3.1, causal-conv1d v1.6.1.post4 | wheel |
 | **Dependencies** | torch 2.10.0+cu128, transformers 5.12.1 | CUDA 12.8 |
 
-## 📝 4. NHẬT KÝ THAY ĐỔI CHI TIẾT (CHANGELOG)
+## 📝 4. CHANGELOG
 
-### [2026-06-17] — Fix nhầm lẫn V0 vs V1 trong §3 Test Verdicts
+> Chi tiết từng commit = `git log --oneline`. Dưới đây là tổng kết phase. Ko ghi từng commit nhỏ.
 
-* **Người thực hiện:** AI Engineer
-* **Trạng thái:** ✅ Completed
-* **Sửa:** Thêm ghi chú đầu §3: tất cả T1-T4 test là từ **V0 (robot)** chứ ko phải V1 (sim). Trước đây ghi nhầm gây lẫn lộn.
-* **Ảnh hưởng:** Báo cáo §4.5 ablation table sẽ ghi đúng "V0 pipeline test", ko ghi "V1".
+### Phase: V2.1 setup → train Option C (17/06/2026)
 
-### [2026-06-17] — Fix reproducibility seed + config Option C
-
-* **Người thực hiện:** AI Engineer
-* **Trạng thái:** ✅ Completed
-
-**Công việc:**
-1. **Seed fix:** thêm `pl.seed_everything(cfg.seed)` vào `train.py` — trước đó stable-pretraining Manager ko đọc seed từ config, weight init + dropout + CUDA ops ngẫu nhiên mỗi lần chạy. Ảnh hưởng: reproducibility cho paper.
-2. **Config Option C:** heads=16, d_state=256, expand=4, depth=6.
-   - **So với cũ:** heads 6→16, d_state 64→256, expand 2→4
-   - **Params thực tế:** total 16.6M (predictor 9.36M, encoder 5.5M, projector×2 1.59M, action_enc 0.16M)
-   - **Tỉ lệ A:M:** 787K : 550K = 1.43:1
-   - **File weights:** 66.6 MB (so với LeWM 72.3 MB — do transformers 5.12.1 vs 5.6.2)
-   - **Training speed:** 4.53 it/s (so với cũ 4.75 — chậm nhẹ do model to hơn)
-   - **Epoch 0:** val/pred_loss=0.088, val/sigreg=56.25
-   - **Epoch 2:** val/pred_loss=**0.203** (giảm), val/sigreg=**6.91** (ổn định)
-3. **Thêm expand param** vào module.py (Mamba2Predictor → Mamba2Transformer → Mamba2ConditionalBlock) để configurable từ YAML.
-
-### [2026-06-17] — HF upload fix try/except + rules nhấn mạnh
-
-* **Người thực hiện:** AI Engineer
-* **Trạng thái:** ✅ Completed
-
-**Công việc đã làm:**
-1. **Fix HF upload crash training:** `_upload_to_hf` wrap try/except — nếu token hết hạn hoặc repo lỗi → in warning, training tiếp tục.
-2. **Tạo repo `hhian/checkpoints`** trên HF — token mới, verify thành công.
-3. **Nhấn mạnh rules** — thêm rule #15 (ko bỏ qua try/except cho I/O).
-
-**Bài học:** `api.upload_file` crash toàn bộ training khi token hết hạn. Mọi I/O (network, disk, HF) phải wrap try/except — training ko được dừng vì lỗi phụ.
-
-### [2026-06-17] — V2.1 setup Vast + dataset fix + rules cleanup
-
-* **Sửa lỗi eval config TwoRoom:** budget=150, goal=100 → **budget=50, goal=25** theo đúng LeWM paper (mọi task budget=50, goal_offset=25). Sai sót do đọc lướt paper — ghi vào rule #13. **⚠️ Ảnh hưởng:** budget 50 × frameskip 5 = 250 env steps — vẫn đủ cho TwoRoom navigation. Nếu thiếu, sau đó mới tăng.
-
-* **Người thực hiện:** AI Engineer
-* **Trạng thái:** ✅ Completed
-
-**Công việc đã làm:**
-1. Setup Vast RTX 5080 instance ($0.175/h) — clone code mới từ `thoan4965-ui/hybrid-cfc-atention-WM`
-2. Cài Mamba-2 wheel (533 MB) + causal-conv1d wheel (274 MB) — thành công
-3. Tạo `download_data.py` — auto tải + giải nén dataset từ HF (`quentinll/lewm-tworooms`)
-4. Fix dataset load error: thêm `hdf5plugin` + `format=hdf5` (HDF5 format trong `stable-worldmodel` yêu cầu `hdf5plugin` để register format)
-5. Thêm HF upload vào `SaveCkptCallback` — tự động đẩy `.pt` + `.ckpt` lên `hhian/checkpoints` mỗi epoch
-6. Fix eval command: tìm `*_epoch_*.pt` thay vì `*_weights.ckpt`
-7. Dọn AGENTS.md: rút từ 146 → 51 dòng, xóa V1.1 lỗi thời, thêm 3-step decision protocol
-8. Dọn memory: xóa ISEF entities (12 entity lẻ tẻ), fix CfC OOD gap 99.76x → 26x
-9. Merge duplicate CEM bug entries (#28 và #42)
-
-**Rules mới/thêm:**
-- **Check thư mục trước sửa/push:** `ls` xem cấu trúc file, hiểu quan hệ config→file→import trước khi edit
-- **Lý thuyết là quan trọng nhất:** đọc paper gốc, hiểu toán trước khi code/kết luận
-- **Ko build source nếu có wheel:** causal-conv1d 274 MB wheel, build từ source mất 5-10 phút
-
-**Chi phí Vast:** ~$0.35 (2h) cho debug dataset/build. Đã fix xong, sẵn sàng train chính thức.
+- Setup Vast RTX 5080, Mamba-2 wheel + causal-conv1d wheel
+- Fix seed `pl.seed_everything(3072)` + config heads=16, d_state=256, expand=4
+- Fix eval budget 150→50, download_data.py, HF upload try/except
+- Dọn AGENTS.md (146→37 dòng), gộp rules vào logbook, thống nhất phiên bản V0→V3.2
+- Train: epoch 0-5, val/pred_loss 0.088→0.050, dự kiến epoch 10 eval
+- Chi phí: ~$0.50 (3h Vast RTX 5080)
 
 ### [2026-06-16] — ISEF Deep Research: Comprehensive 3-Year Analysis + World Model Gap Confirmed
 
