@@ -359,12 +359,12 @@ class Mamba3Predictor(nn.Module):
 class Mamba2ConditionalBlock(nn.Module):
     """Mamba-2 thay FeedForward trong ConditionalBlock — dùng cho V2.1"""
 
-    def __init__(self, dim, heads, dim_head, d_state=64, dropout=0.0):
+    def __init__(self, dim, heads, dim_head, d_state=64, expand=2, dropout=0.0):
         super().__init__()
         from mamba_ssm import Mamba2
 
         self.attn = Attention(dim, heads=heads, dim_head=dim_head, dropout=dropout)
-        self.mamba2 = Mamba2(d_model=dim, d_state=d_state, d_conv=4, expand=2)
+        self.mamba2 = Mamba2(d_model=dim, d_state=d_state, d_conv=4, expand=expand)
         self.norm1 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.norm2 = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.adaLN_modulation = nn.Sequential(
@@ -385,7 +385,7 @@ class Mamba2ConditionalBlock(nn.Module):
 class Mamba2Transformer(nn.Module):
     """Transformer dùng Mamba2ConditionalBlock"""
 
-    def __init__(self, input_dim, hidden_dim, output_dim, depth, heads, dim_head, d_state=64, dropout=0.0):
+    def __init__(self, input_dim, hidden_dim, output_dim, depth, heads, dim_head, d_state=64, expand=2, dropout=0.0):
         super().__init__()
         self.norm = nn.LayerNorm(hidden_dim)
         self.layers = nn.ModuleList([])
@@ -393,7 +393,7 @@ class Mamba2Transformer(nn.Module):
         self.cond_proj = nn.Linear(input_dim, hidden_dim) if input_dim != hidden_dim else nn.Identity()
         self.output_proj = nn.Linear(hidden_dim, output_dim) if hidden_dim != output_dim else nn.Identity()
         for _ in range(depth):
-            self.layers.append(Mamba2ConditionalBlock(hidden_dim, heads, dim_head, d_state, dropout))
+            self.layers.append(Mamba2ConditionalBlock(hidden_dim, heads, dim_head, d_state, expand, dropout))
 
     def forward(self, x, c=None):
         x = self.input_proj(x)
@@ -410,12 +410,12 @@ class Mamba2Predictor(nn.Module):
 
     def __init__(self, *, num_frames, depth=6, heads=6, dim_head=64,
                  input_dim=192, hidden_dim=192, output_dim=None,
-                 d_state=64, dropout=0.0, emb_dropout=0.0):
+                 d_state=64, expand=2, dropout=0.0, emb_dropout=0.0):
         super().__init__()
         self.pos_embedding = nn.Parameter(torch.randn(1, num_frames, input_dim))
         self.dropout = nn.Dropout(emb_dropout)
         self.transformer = Mamba2Transformer(input_dim, hidden_dim, output_dim or input_dim,
-                                              depth, heads, dim_head, d_state, dropout)
+                                              depth, heads, dim_head, d_state, expand, dropout)
 
     def forward(self, x, c):
         T = x.size(1)
