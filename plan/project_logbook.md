@@ -320,6 +320,15 @@ def exp_config(cfg):
 14. **🔥 KHÔNG BUILD SOURCE NẾU CÓ WHEEL.** `causal-conv1d` build từ source (29KB tar.gz) mất 5-10 phút compile CUDA. Wheel có sẵn cho mọi CUDA+Torch combo: `https://github.com/Dao-AILab/causal-conv1d/releases/`. `causal_conv1d-1.6.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl` là 30 giây. Luôn check release page trước, nếu ko có wheel thì mới build.
 15. **🔥 THỜI GIAN TRÊN VAST = TIỀN.** 5 phút build wheel = ~$0.015 (RTX 5080 $0.175/h). Mỗi lần destroy-recreate mất thêm 2-3 phút setup. Tổng thiệt hại do build không cần thiết: ~$0.05-0.10 + 15-30 phút chờ. Nhỏ nhưng tránh được.
 
+### Bài học tổng quát (06/2026)
+
+1. **Không so sánh thiển cận giữa các task.** Push-T ≠ TwoRoom. Mỗi task có trade-off riêng (spatial vs temporal, precision vs memory). Kết luận "cái này dễ hơn cái kia" là thiếu căn cứ.
+2. **Fair comparison = cùng params, cùng T, cùng budget.** V1 thất bại vì T=16 vs T=4. Config cũ thất bại vì heads=6 vs heads=16. Nếu ko match params, ko kết luận được "kiến trúc nào tốt hơn".
+3. **Paper có thể tự mâu thuẫn.** Appendix F.1 ghi 50/25. Repo config ghi 50/25. GitHub issue đọc nhầm thành 150/100. Luôn kiểm tra nhiều nguồn.
+4. **Ghi đè tốt hơn chồng chất.** Logbook nên ghi đè config + rules khi có update — tiết kiệm 70% dung lượng, ko lẫn lộn số cũ vs mới.
+5. **MCP server cần native build → ko portable.** hypothesis-tracker-mcp cần better-sqlite3 → node-gyp → VS Studio → Windows fail. Kiểm tra dependency trước khi recommend.
+6. **Done gate sau mỗi task.** Rules → 3 pillars → research → git → logbook → clarity. Thiếu 1 = ko done.
+
 ### Key Insights
 - CfC là RNN/ODE: nhận 1 frame + hidden state, predict 1 frame. Ko copy AR's batch predict.
 - Phase 1 build hidden state từ history, Phase 2 predict future — hidden state CARRY xuyên suốt
