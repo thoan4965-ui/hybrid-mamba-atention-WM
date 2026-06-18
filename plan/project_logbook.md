@@ -324,6 +324,8 @@ def exp_config(cfg):
 18. **Pixel normalization phải đồng bộ train/eval** — float32/255.0.
 19. **Ko cài torch/torchvision trên Colab** — đã có sẵn.
 20. **Camera cần 30s stabilize** — auto-exposure/white balance cần thời gian.
+21. **🔥 `++output_model_name` để phân biệt experiment.** Ko để chung `lewm` cho nhiều task. VD: `tworoom`, `pusht`, `cube` — HF upload path + local save tự tách. Ko cần sửa file config — chỉ thêm vào command line.
+22. **🔥 Kiểm tra TOÀN BỘ dependencies task trước khi train.** `swm.World` cần `pygame`, `pymunk` cho Push-T. `ale-py` cho Atari. Cài `pip install -q stable-worldmodel[env]` thay vì từng cái lẻ — hoặc kiểm tra `import` trước khi chạy. Lỗi này lặp lại từ TwoRoom (thiếu `hdf5plugin`).
 
 ### Bài học tổng quát (06/2026)
 
@@ -522,11 +524,15 @@ Hoàn thành taxonomy đầy đủ ngày 2026-06-16. Chi tiết trong session lo
 
 > Chi tiết từng commit = `git log --oneline`. Dưới đây là tổng kết phase.
 
-### 18/06/2026 — Push-T: fix dataset + deps + bắt đầu train
+### 18/06/2026 — Push-T: fix dataset + deps + train RTX 5090 + config tối ưu
 
 - Fix config pusht.yaml: name `.lance` → `.h5` (giống TwoRoom)
 - Thêm dependencies: `hdf5plugin`, `pygame`, `pymunk` vào requirements + vast_run.sh
-- Lesson: **lỗi lặp lại từ TwoRoom** — quên check dataset format + env dependencies trước khi chạy. Cần thêm deterministic pre-check cho mỗi task mới.
+- Dùng `++output_model_name=pusht` để phân biệt HF upload path với TwoRoom
+- Config tối ưu: `num_workers=8`, `prefetch_factor=6` cho 128GB RAM + 48 CPU threads
+- RTX 5090: dự kiến ~4-5 it/s, 10 epochs ~8-10h, ~$4-5
+- Lesson: **lỗi lặp lại từ TwoRoom** — quên check dataset format + env dependencies (pygame, pymunk) trước khi chạy. Cần deterministic pre-check cho mỗi task mới.
+- Lesson: **`++output_model_name`** là cách sạch để phân biệt experiment ko cần sửa file config.
 
 ### Phase: V2.1 train + eval TwoRoom (17/06/2026)
 
