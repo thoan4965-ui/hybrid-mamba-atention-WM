@@ -10,3 +10,8 @@ einops
 # Install via: pip install mamba-ssm
 # Or from source: git clone https://github.com/state-spaces/mamba && cd mamba && pip install .
 mamba-ssm
+
+# Push-T env dependencies
+hdf5plugin          # HDF5 format support for swm.data.load_dataset
+pygame              # Push-T environment rendering
+pymunk              # Push-T physics engine

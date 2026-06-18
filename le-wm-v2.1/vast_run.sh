@@ -11,7 +11,7 @@ BATCH=128
 SEED=3072
 
 echo "=== V2.1 Mamba-2: Install ==="
-pip install stable-pretraining stable-worldmodel huggingface_hub hydra-core einops -q
+pip install stable-pretraining stable-worldmodel huggingface_hub hydra-core einops hdf5plugin pygame pymunk -q
 
 echo "=== Install Mamba-2 + causal-conv1d wheel ==="
 pip install https://github.com/state-spaces/mamba/releases/download/v2.3.1/mamba_ssm-2.3.1+cu12torch2.10cxx11abiTRUE-cp312-cp312-linux_x86_64.whl --no-deps -q
