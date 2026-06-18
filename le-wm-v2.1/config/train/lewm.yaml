@@ -7,7 +7,7 @@ defaults:
 output_model_name: lewm
 subdir: ${hydra:job.id}
 
-num_workers: 6
+num_workers: 16   # 96 CPU threads, dataset ~70 GB cache hết ở 128GB RAM
 train_split: 0.9
 seed: 3072
 img_size: 224
@@ -25,7 +25,7 @@ loader:
   batch_size: 128
   num_workers: ${num_workers}
   persistent_workers: True
-  prefetch_factor: 3
+  prefetch_factor: 6
   pin_memory: True
 
 optimizer:
