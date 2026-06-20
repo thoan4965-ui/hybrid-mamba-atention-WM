@@ -29,7 +29,16 @@ Checkpoint epoch 10 là phiên bản cuối và tốt nhất cho tất cả các
 
 ## Tham khảo
 
-LeWorldModel (Maes et al. 2026) — baseline AR predictor.
-CfC (Hasani et al. 2022) — ODE stateful baseline.
-Mamba-2 (Dao & Gu 2024) — SSM backbone.
-Ma & Najarian (2025) — exponential memory decay analysis.
+- [1] LeCun, Y. (2022). A Path Towards Autonomous Machine Intelligence.
+- [2] Maes, L. et al. (2026). LeWorldModel: Stable End-to-End JEPA from Pixels. *arXiv* 2603.19312.
+- [3] Hasani, R. et al. (2022). Closed-form Continuous-time Neural Networks. *Nature Machine Intelligence*.
+- [4] Dao, T. & Gu, A. (2024). Transformers are SSMs: Generalized Models and Efficient Algorithms Through Structured State Space Duality. *ICML* 2024.
+- [5] Balestriero, R. & LeCun, Y. (2025). LeJEPA: Provable and Scalable Self-Supervised Learning Without the Heuristics. *arXiv* 2511.08544.
+- [6] Ma, C. & Najarian, K. (2025). Rethinking the long-range dependency in Mamba/SSM and transformer models. *arXiv* 2509.04226.
+- [7] Huang, Y. (2026). VJEPA: Variational Joint Embedding Predictive Architectures as Probabilistic World Models. *arXiv* 2601.14354.
+- [8] Gu, A. & Dao, T. (2023). Mamba: Linear-Time Sequence Modeling with Selective State Spaces. *arXiv* 2312.00752.
+- [9] Lieber, O. et al. (2024). Jamba: A Hybrid Transformer-Mamba Language Model.
+- [10] Li, Y. et al. (2026). TransMamba: A Sequence-Level Hybrid Transformer-Mamba Language Model. *AAAI* 2026.
+- [11] Liu, X. et al. (2020). Neural SDE: Stabilizing Neural ODE Networks with Stochasticity. *NeurIPS* 2020.
+- [12] Rob Knight (2022). DexHand V1.0: Open-Source Dexterous Humanoid Robot Hand. GitHub.
+
