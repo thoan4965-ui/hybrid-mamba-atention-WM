@@ -5,7 +5,7 @@ from v2_6.genome import init_pop, mutate, MAX_GENES
 from v2_6.cppn import genome_to_policy, policy_forward
 from v2_6.env_ant import NoRewardAnt
 
-env = NoRewardAnt(backend='mjx', energy_init=100., energy_cost=0.2, torque_cost=0.05)
+env = NoRewardAnt(backend='mjx', energy_init=50., energy_cost=0.4, torque_cost=0.05)
 
 @jit
 def eval_batch(nodes, conns, keys):
