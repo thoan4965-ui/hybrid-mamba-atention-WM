@@ -1,79 +1,73 @@
-"""V2.6 genome — ZERO .at on viewed arrays. Pure jnp.where + broadcasting."""
+"""Genome + innovation-aligned crossover + Tag support."""
 import jax, jax.numpy as jnp
-from jax import random
+from jax import random, jit
 
-MAX_GENES = 100; NODE_PARAMS = 7; CONN_PARAMS = 8
-COL_INNOV=0; COL_TYPE=1; COL_X=2; COL_Y=3; COL_ACT=4; COL_BIAS=5; COL_EXPR=6
+MAX_GENES = 100; NODE_PARAMS = 7; CONN_PARAMS = 8; TAG_DIM = 16
 
 def init_pop(key, pop_size=128):
     nodes = jnp.full((pop_size, MAX_GENES, NODE_PARAMS), jnp.nan)
     conns = jnp.full((pop_size, MAX_GENES, CONN_PARAMS), jnp.nan)
+    tags = jnp.zeros((pop_size, TAG_DIM))
     innov = 0
     for i in range(pop_size):
         for j in range(3):
-            nodes = nodes.at[i, j].set(jnp.array([float(innov), 0, -1.0+j*1.0, -1.0+j*1.0, 0., 1., 1.]))
+            nodes = nodes.at[i, j].set(jnp.array([float(innov), 0, -1.+j, -1.+j, 0., 1., 1.]))
             innov += 1
         for j in range(2):
             conns = conns.at[i, j].set(jnp.array([float(innov), float(j), float(j+1), 0.5, 1., 1., 0., 0.]))
             innov += 1
-    return {'nodes': nodes, 'conns': conns, 'innov': innov, 'pop_size': pop_size}
+    return {'nodes': nodes, 'conns': conns, 'tags': tags, 'innov': innov, 'pop_size': pop_size}
 
 def mutate(nodes, conns, key, innov_start, subst=0.1, ins=0.03, dele=0.02):
-    pop_size = nodes.shape[0]; ks = random.split(key, pop_size)
-    innov = int(innov_start)
-    
+    pop_size = nodes.shape[0]; ks = random.split(key, pop_size); innov = int(innov_start)
     for i in range(pop_size):
-        k = ks[i]
-        na = int(jnp.sum(~jnp.isnan(nodes[i, :, 0])))
+        k = ks[i]; na = int(jnp.sum(~jnp.isnan(nodes[i, :, 0])))
         ca = int(jnp.sum(~jnp.isnan(conns[i, :, 0])))
         k1, k2, k3, k4 = random.split(k, 4)
-        
-        # COPY preserving NaN
-        n_new = jnp.where(jnp.isnan(nodes[i]), jnp.nan, nodes[i])
-        c_new = jnp.where(jnp.isnan(conns[i]), jnp.nan, conns[i])
-        
-        # --- 1. SUBSTITUTION ---
+        nn = jnp.where(jnp.isnan(nodes[i]), jnp.nan, nodes[i])
+        cc = jnp.where(jnp.isnan(conns[i]), jnp.nan, conns[i])
         sm = random.uniform(k1, (MAX_GENES,)) < subst
-        noise_b = random.normal(k2, (MAX_GENES,)) * 0.05
-        noise_w = random.normal(k3, (MAX_GENES,)) * 0.1
-        
-        col5 = jnp.arange(NODE_PARAMS) == COL_BIAS
-        col3 = jnp.arange(CONN_PARAMS) == 3
-        n_delta = (sm * noise_b)[:, None] * col5[None, :]
-        c_delta = (sm * noise_w)[:, None] * col3[None, :]
-        
-        n_new = n_new + n_delta
-        c_new = c_new + c_delta
-        
-        # --- 2. INSERTION (gene duplication) ---
-        do_ins = float(random.uniform(k4, ())) < ins
-        if do_ins and na < MAX_GENES - 1 and ca < MAX_GENES - 1:
+        nn += (sm * random.normal(k2, (MAX_GENES,)) * 0.05)[:, None] * (jnp.arange(NODE_PARAMS) == 5)[None, :]
+        cc += (sm * random.normal(k3, (MAX_GENES,)) * 0.1)[:, None] * (jnp.arange(CONN_PARAMS) == 3)[None, :]
+        if float(random.uniform(k4, ())) < ins and na < MAX_GENES-1 and ca < MAX_GENES-1:
             src = int(random.randint(k1, (), 0, max(na, 1)))
-            src_row = n_new[src]
-            mask_i = jnp.arange(NODE_PARAMS) == COL_INNOV
-            mask_b = jnp.arange(NODE_PARAMS) == COL_BIAS
-            new_row = jnp.where(mask_i, float(innov), src_row)
-            new_row = jnp.where(mask_b, src_row[COL_BIAS] + float(random.normal(k2, ()) * 0.1), new_row)
-            n_new = jnp.where((jnp.arange(MAX_GENES) == na)[:, None], new_row[None, :], n_new)
-            innov += 1
-            
+            nr = jnp.where(jnp.arange(NODE_PARAMS) == 0, float(innov), nn[src])
+            nr = jnp.where(jnp.arange(NODE_PARAMS) == 5, nr[5] + float(random.normal(k2, ()) * 0.1), nr)
+            nn = jnp.where((jnp.arange(MAX_GENES) == na)[:, None], nr[None, :], nn); innov += 1
             sc = int(random.randint(k3, (), 0, max(ca, 1)))
-            src_c = c_new[sc]
-            mask_ci = jnp.arange(CONN_PARAMS) == COL_INNOV
-            mask_cw = jnp.arange(CONN_PARAMS) == 3
-            new_conn = jnp.where(mask_ci, float(innov), src_c)
-            new_conn = jnp.where(mask_cw, src_c[3] + float(random.normal(k4, ()) * 0.1), new_conn)
-            c_new = jnp.where((jnp.arange(MAX_GENES) == ca)[:, None], new_conn[None, :], c_new)
-            innov += 1
-        
-        # --- 3. DELETION ---
+            nc = jnp.where(jnp.arange(CONN_PARAMS) == 0, float(innov), cc[sc])
+            nc = jnp.where(jnp.arange(CONN_PARAMS) == 3, nc[3] + float(random.normal(k4, ()) * 0.1), nc)
+            cc = jnp.where((jnp.arange(MAX_GENES) == ca)[:, None], nc[None, :], cc); innov += 1
         if ca > 1:
-            dm = random.uniform(k1, (MAX_GENES,)) < dele
-            c_new = jnp.where(dm[:, None], jnp.nan, c_new)
-        
-        nodes = nodes.at[i].set(n_new)
-        conns = conns.at[i].set(c_new)
-    
+            cc = jnp.where((random.uniform(k1, (MAX_GENES,)) < dele)[:, None], jnp.nan, cc)
+        nodes = nodes.at[i].set(nn); conns = conns.at[i].set(cc)
     return nodes, conns, innov
 
-print("✅ genome.py v7 — NaN-preserving copy")
+def mutate_tags(t, key, noise=0.03, rate=0.05):
+    k1, k2 = random.split(key); mask = random.uniform(k1, t.shape) < rate
+    return t + mask * random.normal(k2, t.shape) * noise
+
+def crossover_tags(t1, t2, key):
+    pick = random.bernoulli(key, shape=(TAG_DIM,))
+    return jnp.where(pick, t1, t2)
+
+@jit
+def crossover_innov(child_n, child_c, p1n, p1c, p2n, p2c, fit1, fit2, key):
+    ci = child_n[:, 0]; p1i = p1n[:, 0][None, :]; p2i = p2n[:, 0][None, :]
+    m1 = jnp.abs(p1i - ci[:, None]) < 0.5; m2 = jnp.abs(p2i - ci[:, None]) < 0.5
+    i1 = jnp.argmax(m1, 1); i2 = jnp.argmax(m2, 1)
+    h1 = jnp.any(m1, 1); h2 = jnp.any(m2, 1)
+    pk = random.bernoulli(key, shape=(MAX_GENES,))
+    ma = h1 & h2; o1 = h1 & ~h2; o2 = ~h1 & h2; sf = jnp.where(fit1 >= fit2, 1., 0.)
+    cn = jnp.where(ma[:, None], jnp.where(pk[:, None], p1n[i1], p2n[i2]),
+                   jnp.where(o1[:, None], jnp.where(sf, p1n[i1], jnp.nan),
+                             jnp.where(o2[:, None], jnp.where(1-sf, p2n[i2], jnp.nan), child_n)))
+    ci = child_c[:, 0]; p1i = p1c[:, 0][None, :]; p2i = p2c[:, 0][None, :]
+    m1 = jnp.abs(p1i - ci[:, None]) < 0.5; m2 = jnp.abs(p2i - ci[:, None]) < 0.5
+    i1 = jnp.argmax(m1, 1); i2 = jnp.argmax(m2, 1)
+    h1 = jnp.any(m1, 1); h2 = jnp.any(m2, 1)
+    ma = h1 & h2; o1 = h1 & ~h2; o2 = ~h1 & h2
+    cc = jnp.where(ma[:, None], jnp.where(pk[:, None], p1c[i1], p2c[i2]),
+                   jnp.where(o1[:, None], jnp.where(sf, p1c[i1], jnp.nan),
+                             jnp.where(o2[:, None], jnp.where(1-sf, p2c[i2], jnp.nan), child_c)))
+    return cn, cc
