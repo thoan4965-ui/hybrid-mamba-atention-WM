@@ -4,7 +4,7 @@ import jax.numpy as jnp
 from brax.envs import ant
 
 class NoRewardAnt(ant.Ant):
-    def __init__(self, energy_init=50., energy_cost=0.4, torque_cost=0.05,
+    def __init__(self, energy_init=20., energy_cost=0.4, torque_cost=0.05,
                  food_energy=50, arena=20., **kw):
         super().__init__(**kw)
         self._e_init = energy_init; self._e_cost = energy_cost

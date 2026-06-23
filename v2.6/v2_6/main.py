@@ -1,4 +1,4 @@
-"""V2.6 Phase 3c — AE + Tag + Hebbian + Mechanism X + Lamarckian."""
+"""V2.6 Phase 3e — Fixed: energy=20, AE input = body+action+fitness+energy, dopamine bonus."""
 import jax, jax.numpy as jnp, time, numpy as np
 from jax import random, jit, vmap, lax
 from v2_6.genome import (init_pop, mutate, crossover_innov, mutate_tags,
@@ -9,7 +9,7 @@ from v2_6.ae import init_ae, train_ae, encode, decode
 from v2_6.hebbian import hebbian_update
 from v2_6.expression import mechanism_x
 
-env = NoRewardAnt(backend='mjx', energy_init=50., energy_cost=0.4, torque_cost=0.05)
+env = NoRewardAnt(backend='mjx', energy_init=20., energy_cost=0.4, torque_cost=0.05)
 
 @jit
 def eval_batch(nodes, conns, keys):
@@ -19,10 +19,12 @@ def eval_batch(nodes, conns, keys):
             pol, s = ps
             a = policy_forward(pol, s.obs); s2 = env.step(s, a)
             pol = hebbian_update(pol, s.obs)
-            return (pol, s2), (s2.done, jnp.concatenate([s.obs, a]))
-        (pol, _), (d, ex) = lax.scan(step, (pol, env.reset(k)), jnp.arange(500))
+            return (pol, s2), (s2.done, jnp.concatenate([s.obs, a, s2.info['energy'][None]]))
+        (pol, s_final), (d, ex) = lax.scan(step, (pol, env.reset(k)), jnp.arange(500))
         fd = jnp.argmax(d > 0.5)
-        return jnp.where(jnp.any(d > 0.5), fd + 1., 500.), jnp.mean(ex, 0)
+        alive = jnp.where(jnp.any(d > 0.5), fd + 1., 500.)
+        final_energy = s_final.info['energy']
+        return alive, jnp.concatenate([alive[None], final_energy[None], jnp.mean(ex, 0)])
     return vmap(single)(nodes, conns, keys)
 
 def run(n_gen=200, pop_size=128, seed=3072):
@@ -31,26 +33,45 @@ def run(n_gen=200, pop_size=128, seed=3072):
     curve = []; t0 = time.time()
     _ = eval_batch(state['nodes'][:4], state['conns'][:4],
                    vmap(lambda i: random.PRNGKey(i))(jnp.arange(4)))
-    print(f"Phase 3d: {n_gen} gen x {pop_size} pop (sensor+multi-eval)", flush=True)
+    print(f"Phase 3e: {n_gen} gen x {pop_size} pop (energy=20, dopamine bonus)", flush=True)
 
     for g in range(n_gen):
         k0 = random.PRNGKey(g * 3)
         fs, exs = [], []
         for ri in range(3):
             kk = random.split(random.fold_in(k0, ri), pop_size)
-            ff, ee = eval_batch(state['nodes'], state['conns'], kk)
-            fs.append(ff); exs.append(ee)
+            raw = eval_batch(state['nodes'], state['conns'], kk)
+            f = raw[:, 0]        # steps_alive
+            final_e = raw[:, 1]   # energy cuối
+            r = raw[:, 2:]        # mean(obs_29 + action_8 + energy_step)
+            fs.append(f); exs.append(r)
         f = jnp.mean(jnp.stack(fs), axis=0)
-        ex = jnp.mean(jnp.stack(exs), axis=0)
-        curve.append((float(jnp.max(f)), float(jnp.mean(f))))
-        ae = train_ae(ae, ex, random.PRNGKey(g + 1000))
-        nt = vmap(lambda e: encode(ae, e))(ex)
-        mx = mechanism_x(state['nodes'], state['tags'], f)
+        ex_raw = jnp.mean(jnp.stack(exs), axis=0)
+
+        ae_input = jnp.concatenate([
+            ex_raw[:, :27],      # obs_body (bỏ dx,dy)
+            ex_raw[:, 27:35],    # action
+            f[:, None],          # fitness
+            final_e[:, None]     # energy cuối
+        ], axis=1)
+
+        ae = train_ae(ae, ae_input, random.PRNGKey(g + 1000))
+        nt = vmap(lambda e: encode(ae, e))(ae_input)
+        dec = vmap(lambda e: decode(ae, encode(ae, e)))(ae_input[:10])
+        ae_loss = jnp.mean((ae_input[:10] - dec) ** 2)
+
+        dopamine = ae_loss / (jnp.max(ae_loss) + 1e-8)
+        f_total = f + 50 * dopamine
+        f_show = f
+
+        curve.append((float(jnp.max(f_total)), float(jnp.mean(f_total))))
+
+        mx = mechanism_x(state['nodes'], state['tags'], f_total)
         mr = float(jnp.mean(mx))
 
         k1, k2 = random.split(random.PRNGKey(g + seed))
         idx = random.randint(k1, (pop_size, 3), 0, pop_size)
-        pr = idx[jnp.arange(pop_size), jnp.argmax(f[idx], axis=1)]
+        pr = idx[jnp.arange(pop_size), jnp.argmax(f_total[idx], axis=1)]
         cn = jnp.full((pop_size, MAX_GENES, NODE_PARAMS), jnp.nan)
         cc = jnp.full((pop_size, MAX_GENES, CONN_PARAMS), jnp.nan)
         tc = jnp.zeros((pop_size, TAG_DIM))
@@ -61,11 +82,11 @@ def run(n_gen=200, pop_size=128, seed=3072):
             c1n, c1c = crossover_innov(state['nodes'][p1], state['conns'][p1],
                                         state['nodes'][p1], state['conns'][p1],
                                         state['nodes'][p2], state['conns'][p2],
-                                        f[p1], f[p2], kx)
+                                        f_total[p1], f_total[p2], kx)
             c2n, c2c = crossover_innov(state['nodes'][p2], state['conns'][p2],
                                         state['nodes'][p1], state['conns'][p1],
                                         state['nodes'][p2], state['conns'][p2],
-                                        f[p1], f[p2], ky)
+                                        f_total[p1], f_total[p2], ky)
             cn = cn.at[i*2].set(c1n); cn = cn.at[i*2+1].set(c2n)
             cc = cc.at[i*2].set(c1c); cc = cc.at[i*2+1].set(c2c)
             tc = tc.at[i*2].set(crossover_tags(nt[p1], nt[p2], kt1))
@@ -77,7 +98,7 @@ def run(n_gen=200, pop_size=128, seed=3072):
 
         cn, cc, ni = mutate(cn, cc, k2, state['innov'], .1*mr, .03*mr, .02*mr)
         tc = mutate_tags(tc, k2, noise=.03*mr)
-        top2 = jnp.argsort(f)[-2:]
+        top2 = jnp.argsort(f_total)[-2:]
         for j in range(2):
             cn = cn.at[j].set(state['nodes'][top2[j]])
             cc = cc.at[j].set(state['conns'][top2[j]])
@@ -87,8 +108,7 @@ def run(n_gen=200, pop_size=128, seed=3072):
 
         if (g + 1) % 20 == 0:
             dt = time.time() - t0; eta = dt/(g+1)*(n_gen-g-1)/60
-            dec = vmap(lambda e: decode(ae, encode(ae, e)))(ex[:10])
-            al = float(jnp.nanmean((ex[:10] - dec) ** 2))
+            al = float(ae_loss)
             print(f"G{g+1}: max={curve[-1][0]:.0f} mean={curve[-1][1]:.0f}"
                   f" ae={al:.4f} mx={mr:.3f} [{dt:.0f}s ETA {eta:.0f}m]", flush=True)
 
@@ -96,10 +116,10 @@ def run(n_gen=200, pop_size=128, seed=3072):
     ffs = []
     for ri in range(3):
         kk = random.split(random.fold_in(k0, ri), pop_size)
-        ff, _ = eval_batch(state['nodes'], state['conns'], kk)
-        ffs.append(ff)
+        raw = eval_batch(state['nodes'], state['conns'], kk)
+        ffs.append(raw[:, 0])
     ff = jnp.mean(jnp.stack(ffs), axis=0)
     bi = int(jnp.argmax(ff))
-    print(f"Best: {float(jnp.max(ff)):.0f}", flush=True)
+    print(f"Best steps: {float(jnp.max(ff)):.0f}", flush=True)
     return {'curve': jnp.array(curve), 'best_nodes': state['nodes'][bi],
             'best_conns': state['conns'][bi], 'best_fitness': float(jnp.max(ff))}
