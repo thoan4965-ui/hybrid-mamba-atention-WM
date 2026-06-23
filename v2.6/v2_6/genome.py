@@ -35,11 +35,11 @@ def mutate(nodes, conns, key, innov_start, subst=0.1, ins=0.03, dele=0.02):
         cc += (sm * random.normal(k3, (MAX_GENES,)) * 0.1)[:, None] * (jnp.arange(CONN_PARAMS) == 3)[None, :]
         do_ins = (random.uniform(k4, ()) < ins) & (na < MAX_GENES - 1) & (ca < MAX_GENES - 1)
         src = random.randint(k1, (), 0, jnp.maximum(na, 1).astype(jnp.int32))
-        nr = jnp.where(jnp.arange(NODE_PARAMS) == 0, float(innov), nn[src])
+        nr = jnp.where(jnp.arange(NODE_PARAMS) == 0, innov.astype(jnp.float32), nn[src])
         nr = jnp.where(jnp.arange(NODE_PARAMS) == 5, nr[5] + random.normal(k2, ()) * 0.1, nr)
         nn = jnp.where(do_ins & (jnp.arange(MAX_GENES) == na)[:, None], nr[None, :], nn)
         sc = random.randint(k3, (), 0, jnp.maximum(ca, 1).astype(jnp.int32))
-        nc = jnp.where(jnp.arange(CONN_PARAMS) == 0, float(innov + 1), cc[sc])
+        nc = jnp.where(jnp.arange(CONN_PARAMS) == 0, (innov + 1).astype(jnp.float32), cc[sc])
         nc = jnp.where(jnp.arange(CONN_PARAMS) == 3, nc[3] + random.normal(k4, ()) * 0.1, nc)
         cc = jnp.where(do_ins & (jnp.arange(MAX_GENES) == ca)[:, None], nc[None, :], cc)
         added = do_ins * 2
