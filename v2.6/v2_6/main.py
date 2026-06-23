@@ -7,7 +7,7 @@ from v2_6.cppn import genome_to_policy, policy_forward
 from v2_6.env_ant import NoRewardAnt
 from v2_6.ae import init_ae, train_ae, encode, decode
 from v2_6.hebbian import hebbian_update
-from v2_6.expression import mechanism_x
+
 from huggingface_hub import HfApi
 
 env = NoRewardAnt(backend='mjx', energy_init=20., energy_cost=0.4, torque_cost=0.05)
