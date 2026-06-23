@@ -16,7 +16,7 @@ def train_ae(p, d, key, lr=0.001, steps=30):
     dm = jnp.mean(d); ds = jnp.std(d) + 1e-8; dn = (d - dm) / ds
     def loss(p):
         z = jnp.tanh(dn @ p['We'] + p['be']); recon = z @ p['Wd'] + p['bd']
-        return jnp.mean((dn - recon) ** 2) + 1e-4 * (jnp.sum(p['We']**2) + jnp.sum(p['Wd']**2))
+        return jnp.mean((dn - recon) ** 2) + 1e-3 * (jnp.sum(p['We']**2) + jnp.sum(p['Wd']**2))
     def step(p, _):
         g = jax.grad(loss)(p); g = {k: jnp.clip(v, -1., 1.) for k, v in g.items()}
         return {k: p[k] - lr * g[k] for k in p}, None

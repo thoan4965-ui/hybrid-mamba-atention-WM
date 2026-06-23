@@ -47,10 +47,10 @@ def run(n_gen=200, pop_size=128, seed=3072):
         ex_raw = jnp.mean(jnp.stack(exs), axis=0)
 
         ae_input = jnp.concatenate([
-            ex_raw[:, :27],      # obs_body (bỏ dx,dy ở 27,28)
-            ex_raw[:, 29:37],    # action
-            f[:, None],          # fitness
-            final_e[:, None]     # energy cuối
+            ex_raw[:, :27],         # obs_body (bỏ dx,dy ở 27,28)
+            ex_raw[:, 29:37],       # action
+            f[:, None] / 500.,      # fitness [0,1]
+            final_e[:, None] / 20.  # energy [0,1]
         ], axis=1)
 
         ae = train_ae(ae, ae_input, random.PRNGKey(g + 1000))
@@ -58,7 +58,8 @@ def run(n_gen=200, pop_size=128, seed=3072):
         all_dec = vmap(lambda e: decode(ae, encode(ae, e)))(ae_input)
         per_loss = jnp.mean((ae_input - all_dec) ** 2, axis=1)
         dopamine = per_loss / (jnp.max(per_loss) + 1e-8)
-        f_total = f + 50 * dopamine
+        skip_dopa = jnp.where(jnp.any(jnp.isnan(dopamine)), 1., 0.)
+        f_total = jnp.where(skip_dopa, f, f + 50 * dopamine)
         ae_loss = jnp.mean(per_loss)
 
         curve.append((float(jnp.max(f_total)), float(jnp.mean(f_total))))
