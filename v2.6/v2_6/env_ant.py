@@ -32,6 +32,7 @@ class NoRewardAnt(ant.Ant):
 
     def step(self, state, action):
         ps = self.pipeline_step(state.pipeline_state, action)
+        ps = ps.replace(qpos=jnp.nan_to_num(ps.qpos, 0.), qvel=jnp.nan_to_num(ps.qvel, 0.))
         e = state.info['energy'] - self._e_cost - self._t_cost * jnp.sum(jnp.square(action))
         st = state.info['step'] + 1.
         ap = ps.x.pos[0,:2]; fp = state.info['food_pos']

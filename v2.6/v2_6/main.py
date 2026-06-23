@@ -21,9 +21,11 @@ def eval_batch(nodes, conns, keys):
             pol = hebbian_update(pol, s.obs)
             return (pol, s2), (s2.done, jnp.concatenate([s.obs, a, s2.info['energy'][None]]))
         (pol, s_final), (d, ex) = lax.scan(step, (pol, env.reset(k)), jnp.arange(500))
+        d = jnp.nan_to_num(d, nan=1.)
+        ex = jnp.nan_to_num(ex, nan=0.)
         fd = jnp.argmax(d > 0.5)
         alive = jnp.where(jnp.any(d > 0.5), fd + 1., 500.)
-        final_energy = s_final.info['energy']
+        final_energy = jnp.nan_to_num(s_final.info['energy'], nan=0.)
         return alive, jnp.concatenate([alive[None], final_energy[None], jnp.mean(ex, 0)])
     return vmap(single)(nodes, conns, keys)
 
@@ -42,7 +44,7 @@ def run(n_gen=200, pop_size=128, seed=3072):
             kk = random.split(random.fold_in(k0, ri), pop_size)
             f, r = eval_batch(state['nodes'], state['conns'], kk)
             es.append(r[:, 1]); exs.append(r[:, 2:]); fs.append(f)
-        f = jnp.mean(jnp.stack(fs), axis=0)
+        f = jnp.nan_to_num(jnp.mean(jnp.stack(fs), axis=0), nan=0.)
         final_e = jnp.mean(jnp.stack(es), axis=0)
         ex_raw = jnp.mean(jnp.stack(exs), axis=0)
 
