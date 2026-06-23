@@ -1,11 +1,11 @@
-"""Autoencoder 35→16→35 — NaN-safe."""
+"""Autoencoder 37→16→37 — NaN-safe."""
 import jax, jax.numpy as jnp
 from jax import random, jit, vmap
 
 def init_ae(key):
     k1, k2 = random.split(key)
-    return {'We': random.normal(k1, (35, 16)) * 0.01, 'be': jnp.zeros(16),
-            'Wd': random.normal(k2, (16, 35)) * 0.01, 'bd': jnp.zeros(35)}
+    return {'We': random.normal(k1, (37, 16)) * 0.01, 'be': jnp.zeros(16),
+            'Wd': random.normal(k2, (16, 37)) * 0.01, 'bd': jnp.zeros(37)}
 
 def encode(p, x): return jnp.tanh(x @ p['We'] + p['be'])
 def decode(p, z): return z @ p['Wd'] + p['bd']

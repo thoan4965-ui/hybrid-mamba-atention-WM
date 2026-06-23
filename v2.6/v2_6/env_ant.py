@@ -43,6 +43,11 @@ class NoRewardAnt(ant.Ant):
         has_e = jnp.where(e > 0, 1., 0.)
         done = 1. - (healthy * has_e)
         obs = self._get_obs(ps)
+        has_food = jnp.any(fc > 0)
+        nearest = jnp.argmin(d + (fc <= 0) * 999., axis=0)
+        dx = jnp.where(has_food, fp[nearest, 0] - ap[0], 0.)
+        dy = jnp.where(has_food, fp[nearest, 1] - ap[1], 0.)
+        obs = jnp.concatenate([obs, jnp.array([dx, dy])])
         return state.replace(pipeline_state=ps, obs=obs,
                              reward=jnp.zeros_like(state.reward), done=done,
                              info={'energy': e, 'food_pos': fp,

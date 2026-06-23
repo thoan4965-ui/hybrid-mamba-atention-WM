@@ -46,11 +46,11 @@ def make_substrate(n_obs=27, n_hid=10, n_act=8):
             ho = ho.at[idx].set(jnp.array([h/n_hid*2-1, 0., o/n_act*2-1, 1.]))
     return ih, ho
 
-SUBS_IH, SUBS_HO = make_substrate()
+SUBS_IH, SUBS_HO = make_substrate(n_obs=29)
 
 @jit
 def genome_to_policy(nodes, conns):
-    w_ih = cppn_query(nodes, conns, SUBS_IH).reshape(28, 10)
+    w_ih = cppn_query(nodes, conns, SUBS_IH).reshape(30, 10)
     w_ho = cppn_query(nodes, conns, SUBS_HO).reshape(10, 8)
     return {'w_ih': w_ih, 'w_ho': w_ho}
 

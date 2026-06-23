@@ -31,11 +31,17 @@ def run(n_gen=200, pop_size=128, seed=3072):
     curve = []; t0 = time.time()
     _ = eval_batch(state['nodes'][:4], state['conns'][:4],
                    vmap(lambda i: random.PRNGKey(i))(jnp.arange(4)))
-    print(f"Phase 3c: {n_gen} gen x {pop_size} pop", flush=True)
+    print(f"Phase 3d: {n_gen} gen x {pop_size} pop (sensor+multi-eval)", flush=True)
 
     for g in range(n_gen):
-        k = random.split(random.PRNGKey(g), pop_size)
-        f, ex = eval_batch(state['nodes'], state['conns'], k)
+        k0 = random.PRNGKey(g * 3)
+        fs, exs = [], []
+        for ri in range(3):
+            kk = random.split(random.fold_in(k0, ri), pop_size)
+            ff, ee = eval_batch(state['nodes'], state['conns'], kk)
+            fs.append(ff); exs.append(ee)
+        f = jnp.mean(jnp.stack(fs), axis=0)
+        ex = jnp.mean(jnp.stack(exs), axis=0)
         curve.append((float(jnp.max(f)), float(jnp.mean(f))))
         ae = train_ae(ae, ex, random.PRNGKey(g + 1000))
         nt = vmap(lambda e: encode(ae, e))(ex)
@@ -86,8 +92,13 @@ def run(n_gen=200, pop_size=128, seed=3072):
             print(f"G{g+1}: max={curve[-1][0]:.0f} mean={curve[-1][1]:.0f}"
                   f" ae={al:.4f} mx={mr:.3f} [{dt:.0f}s ETA {eta:.0f}m]", flush=True)
 
-    k = random.split(random.PRNGKey(999), pop_size)
-    ff, _ = eval_batch(state['nodes'], state['conns'], k)
+    k0 = random.PRNGKey(999)
+    ffs = []
+    for ri in range(3):
+        kk = random.split(random.fold_in(k0, ri), pop_size)
+        ff, _ = eval_batch(state['nodes'], state['conns'], kk)
+        ffs.append(ff)
+    ff = jnp.mean(jnp.stack(ffs), axis=0)
     bi = int(jnp.argmax(ff))
     print(f"Best: {float(jnp.max(ff)):.0f}", flush=True)
     return {'curve': jnp.array(curve), 'best_nodes': state['nodes'][bi],
