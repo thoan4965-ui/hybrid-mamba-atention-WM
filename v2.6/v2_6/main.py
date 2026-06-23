@@ -130,25 +130,33 @@ def run(n_gen=200, pop_size=128, seed=3072, resume_path=None):
         k1, k2 = random.split(random.PRNGKey(g + seed))
         idx = random.randint(k1, (pop_size, 3), 0, pop_size)
         pr = idx[jnp.arange(pop_size), jnp.argmax(f_total[idx], axis=1)]
+        np2 = pop_size // 2
+        p1_arr = pr[0::2]; p2_arr = pr[1::2]
+        kx_arr = vmap(lambda i: random.fold_in(k2, i * 4 + 0))(jnp.arange(np2))
+        ky_arr = vmap(lambda i: random.fold_in(k2, i * 4 + 1))(jnp.arange(np2))
+        kt_arr = vmap(lambda i: random.fold_in(k2, i * 4 + 2))(jnp.arange(np2))
+        ks_arr = vmap(lambda i: random.fold_in(k2, i * 4 + 3))(jnp.arange(np2))
+        cx_batch = vmap(crossover_innov, in_axes=(0,0,0,0,0,0,0,0,0))
+        c1n, c1c = cx_batch(state['nodes'][p1_arr], state['conns'][p1_arr],
+            state['nodes'][p1_arr], state['conns'][p1_arr],
+            state['nodes'][p2_arr], state['conns'][p2_arr],
+            f_total[p1_arr], f_total[p2_arr], kx_arr)
+        c2n, c2c = cx_batch(state['nodes'][p2_arr], state['conns'][p2_arr],
+            state['nodes'][p1_arr], state['conns'][p1_arr],
+            state['nodes'][p2_arr], state['conns'][p2_arr],
+            f_total[p1_arr], f_total[p2_arr], ky_arr)
         cn = jnp.full((pop_size, MAX_GENES, NODE_PARAMS), jnp.nan)
         cc = jnp.full((pop_size, MAX_GENES, CONN_PARAMS), jnp.nan)
         tc = jnp.zeros((pop_size, TAG_DIM))
-        for i in range(pop_size // 2):
-            p1, p2 = pr[i*2], pr[i*2+1]
-            kx, ky, kt1, kt2 = random.split(random.fold_in(k2, i), 4)
-            c1n, c1c = crossover_innov(state['nodes'][p1], state['conns'][p1],
-                state['nodes'][p1], state['conns'][p1],
-                state['nodes'][p2], state['conns'][p2], f_total[p1], f_total[p2], kx)
-            c2n, c2c = crossover_innov(state['nodes'][p2], state['conns'][p2],
-                state['nodes'][p1], state['conns'][p1],
-                state['nodes'][p2], state['conns'][p2], f_total[p1], f_total[p2], ky)
-            cn = cn.at[i*2].set(c1n); cn = cn.at[i*2+1].set(c2n)
-            cc = cc.at[i*2].set(c1c); cc = cc.at[i*2+1].set(c2c)
-            tc = tc.at[i*2].set(crossover_tags(nt[p1], nt[p2], kt1))
-            tc = tc.at[i*2+1].set(crossover_tags(nt[p1], nt[p2], kt2))
-            td = jnp.tile(nt[p1] - nt[p2], 7)[:MAX_GENES]
-            delta = jnp.zeros((MAX_GENES, NODE_PARAMS)).at[:, 5].set(0.01 * td)
-            cn = cn.at[i*2].set(cn[i*2] + delta); cn = cn.at[i*2+1].set(cn[i*2+1] + delta)
+        cn = cn.at[0::2].set(c1n); cn = cn.at[1::2].set(c2n)
+        cc = cc.at[0::2].set(c1c); cc = cc.at[1::2].set(c2c)
+        ct_batch = vmap(crossover_tags)
+        tc = tc.at[0::2].set(ct_batch(nt[p1_arr], nt[p2_arr], kt_arr))
+        tc = tc.at[1::2].set(ct_batch(nt[p2_arr], nt[p1_arr], ks_arr))
+        td_arr = vmap(lambda p1, p2: jnp.tile(nt[p1] - nt[p2], 7)[:MAX_GENES])(p1_arr, p2_arr)
+        delta = jnp.zeros((np2, MAX_GENES, NODE_PARAMS)).at[:, :, 5].set(0.01 * td_arr)
+        cn = cn.at[0::2].set(cn[0::2] + delta)
+        cn = cn.at[1::2].set(cn[1::2] + delta)
         cn, cc, ni = mutate(cn, cc, k2, state['innov'], .1*mr, .03*mr, .02*mr)
         tc = mutate_tags(tc, k2, noise=.03*mr)
         top2 = jnp.argsort(f_total)[-2:]
