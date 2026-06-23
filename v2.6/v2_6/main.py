@@ -57,8 +57,11 @@ def save_checkpoint(state, ae, gen, curve, path, hf_api=None, hf_repo=None):
         ae_Wd=np.array(ae['Wd']), ae_bd=np.array(ae['bd']),
         gen=gen, curve=np.array(curve))
     if hf_api and hf_repo:
-        hf_api.upload_file(path_or_fileobj=path, path_in_repo=f"checkpoints/cp_{gen}.npz", repo_id=hf_repo)
-        print(f"  Checkpoint G{gen} uploaded to HF", flush=True)
+        try:
+            hf_api.upload_file(path_or_fileobj=path, path_in_repo=f"checkpoints/cp_{gen}.npz", repo_id=hf_repo)
+            print(f"  Checkpoint G{gen} uploaded to HF", flush=True)
+        except:
+            print(f"  Warning: HF upload failed for G{gen}, checkpoint saved locally", flush=True)
 
 def load_checkpoint(path):
     d = np.load(path, allow_pickle=True)
