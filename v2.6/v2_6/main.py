@@ -47,11 +47,10 @@ def run(n_gen=200, pop_size=128, seed=3072):
         ex_raw = jnp.mean(jnp.stack(exs), axis=0)
 
         ae_input = jnp.concatenate([
-            ex_raw[:, :27],         # obs_body (bỏ dx,dy ở 27,28)
-            ex_raw[:, 29:37],       # action
+            ex_raw[:, 29:37],       # action (8)
             f[:, None] / 500.,      # fitness [0,1]
-            final_e[:, None] / 20.  # energy [0,1]
-        ], axis=1)
+            ex_raw[:, 37:38]        # energy [can be up to 20]
+        ], axis=1)                   # total: 10 dim
 
         ae = train_ae(ae, ae_input, random.PRNGKey(g + 1000))
         nt = vmap(lambda e: encode(ae, e))(ae_input)
