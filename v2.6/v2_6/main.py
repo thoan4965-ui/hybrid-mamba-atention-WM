@@ -160,7 +160,8 @@ def run(n_gen=200, pop_size=128, seed=3072, resume_path=None):
         delta = jnp.zeros((np2, MAX_GENES, NODE_PARAMS)).at[:, :, 5].set(0.01 * td_arr)
         cn = cn.at[0::2].set(cn[0::2] + delta)
         cn = cn.at[1::2].set(cn[1::2] + delta)
-        cn, cc, ni = mutate(cn, cc, k2, state['innov'], .1*mr, .03*mr, .02*mr)
+        cn, cc, ni_jit = mutate(cn, cc, k2, state['innov'], .1*mr, .03*mr, .02*mr)
+        ni = int(ni_jit)
         tc = mutate_tags(tc, k2, noise=.03*mr)
         top2 = jnp.argsort(f_total)[-2:]
         for j in range(2):

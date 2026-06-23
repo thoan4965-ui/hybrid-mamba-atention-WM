@@ -48,7 +48,7 @@ def mutate(nodes, conns, key, innov_start, subst=0.1, ins=0.03, dele=0.02):
         n = n.at[i].set(nn); c = c.at[i].set(cc)
         return (n, c, innov + added.astype(jnp.int32)), None
     (nodes, conns, innov), _ = lax.scan(step, (nodes, conns, jnp.int32(innov_start)), (jnp.arange(ps, dtype=jnp.int32), keys))
-    return nodes, conns, int(innov)
+    return nodes, conns, innov
 
 def mutate_tags(t, key, noise=0.03, rate=0.05):
     k1, k2 = random.split(key); mask = random.uniform(k1, t.shape) < rate
