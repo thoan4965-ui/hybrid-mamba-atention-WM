@@ -178,7 +178,7 @@ def run(n_gen=200, pop_size=128, seed=3072, resume_path=None):
         if (g + 1) % 500 == 0 or g == n_gen - 1:
             os.makedirs("checkpoints", exist_ok=True)
             cp_path = f"checkpoints/cp_{g+1}.npz"
-            save_checkpoint(state, ae, g+1, curve, cp_path, hf_api, "thoan4965-ui/hybrid-mamba-atention-WM")
+            save_checkpoint(state, ae, g+1, curve, cp_path, hf_api, "hhian/checkpoints")
 
     ffs = []
     for ri in range(3):
