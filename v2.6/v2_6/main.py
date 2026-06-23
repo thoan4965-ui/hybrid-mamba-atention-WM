@@ -1,5 +1,5 @@
-"""V2.6 Phase 3e — Fixed: energy=20, AE input = body+action+fitness+energy, dopamine bonus."""
-import jax, jax.numpy as jnp, time, numpy as np
+"""V2.6 Phase 3e — scaled: 5000gen x 1024pop, HF checkpoint, resume."""
+import jax, jax.numpy as jnp, time, numpy as np, os
 from jax import random, jit, vmap, lax
 from v2_6.genome import (init_pop, mutate, crossover_innov, mutate_tags,
                           crossover_tags, MAX_GENES, NODE_PARAMS, CONN_PARAMS, TAG_DIM)
@@ -8,6 +8,7 @@ from v2_6.env_ant import NoRewardAnt
 from v2_6.ae import init_ae, train_ae, encode, decode
 from v2_6.hebbian import hebbian_update
 from v2_6.expression import mechanism_x
+from huggingface_hub import HfApi, login
 
 env = NoRewardAnt(backend='mjx', energy_init=20., energy_cost=0.4, torque_cost=0.05)
 
@@ -29,15 +30,55 @@ def eval_batch(nodes, conns, keys):
         return alive, jnp.concatenate([alive[None], final_energy[None], jnp.mean(ex, 0)])
     return vmap(single)(nodes, conns, keys)
 
-def run(n_gen=200, pop_size=128, seed=3072):
-    key = random.PRNGKey(seed); ae_key, ga_key = random.split(key)
-    state = init_pop(ga_key, pop_size); ae = init_ae(ae_key)
-    curve = []; t0 = time.time()
-    _ = eval_batch(state['nodes'][:4], state['conns'][:4],
-                   vmap(lambda i: random.PRNGKey(i))(jnp.arange(4)))
-    print(f"Phase 3e: {n_gen} gen x {pop_size} pop (energy=20, dopamine bonus)", flush=True)
+def save_checkpoint(state, ae, gen, curve, path, hf_api=None, hf_repo=None):
+    np.savez(path,
+        nodes=np.array(state['nodes']), conns=np.array(state['conns']),
+        tags=np.array(state['tags']), innov=state['innov'],
+        ae_We=np.array(ae['We']), ae_be=np.array(ae['be']),
+        ae_Wd=np.array(ae['Wd']), ae_bd=np.array(ae['bd']),
+        gen=gen, curve=np.array(curve))
+    if hf_api and hf_repo:
+        hf_api.upload_file(path_or_fileobj=path, path_in_repo=f"checkpoints/cp_{gen}.npz", repo_id=hf_repo)
+        print(f"  Checkpoint G{gen} uploaded to HF", flush=True)
 
-    for g in range(n_gen):
+def load_checkpoint(path):
+    d = np.load(path, allow_pickle=True)
+    state = {'nodes': jnp.array(d['nodes']), 'conns': jnp.array(d['conns']),
+             'tags': jnp.array(d['tags']), 'innov': int(d['innov']),
+             'pop_size': d['nodes'].shape[0]}
+    ae = {'We': jnp.array(d['ae_We']), 'be': jnp.array(d['ae_be']),
+          'Wd': jnp.array(d['ae_Wd']), 'bd': jnp.array(d['ae_bd'])}
+    return state, ae, int(d['gen']), list(d['curve'])
+
+def download_latest_hf(api, repo_id, dest="."):
+    files = api.list_repo_files(repo_id, token=api.token)
+    cps = sorted([f for f in files if f.startswith("checkpoints/")])
+    if not cps: return None
+    return api.hf_hub_download(repo_id=repo_id, filename=cps[-1], local_dir=dest, token=api.token)
+
+def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
+    key = random.PRNGKey(seed)
+    hf_api = None
+    try:
+        hf_token = os.environ.get("HF_TOKEN")
+        if hf_token:
+            hf_api = HfApi(token=hf_token)
+            print(f"HF connected: {hf_api.whoami()['name']}", flush=True)
+    except: pass
+
+    if resume_path:
+        state, ae, gen_start, curve = load_checkpoint(resume_path)
+        print(f"Resumed from G{gen_start}, pop={state['pop_size']}", flush=True)
+    else:
+        ae_key, ga_key = random.split(key)
+        state = init_pop(ga_key, pop_size); ae = init_ae(ae_key)
+        gen_start = 0; curve = []
+        _ = eval_batch(state['nodes'][:4], state['conns'][:4],
+                       vmap(lambda i: random.PRNGKey(i))(jnp.arange(4)))
+        print(f"Phase 3e: {n_gen} gen x {pop_size} pop", flush=True)
+
+    t0 = time.time()
+    for g in range(gen_start, n_gen):
         k0 = random.PRNGKey(g * 3)
         fs, es, exs = [], [], []
         for ri in range(3):
@@ -51,7 +92,7 @@ def run(n_gen=200, pop_size=128, seed=3072):
         ae_input = jnp.concatenate([
             ex_raw[:, 29:37],       # action (8)
             f[:, None] / 500.,      # fitness [0,1]
-            ex_raw[:, 37:38]        # energy [can be up to 20]
+            ex_raw[:, 37:38]        # energy
         ], axis=1)                   # total: 10 dim
 
         skip_ae = float(jnp.mean(f)) < 7.
@@ -67,30 +108,25 @@ def run(n_gen=200, pop_size=128, seed=3072):
             dopamine = jnp.zeros(pop_size)
             ae_loss = 0.
         f_total = f + 50 * dopamine
-
         curve.append((float(jnp.max(f_total)), float(jnp.mean(f_total))))
 
         mx = mechanism_x(state['nodes'], state['tags'], f_total)
         mr = float(jnp.mean(mx))
-
         k1, k2 = random.split(random.PRNGKey(g + seed))
         idx = random.randint(k1, (pop_size, 3), 0, pop_size)
         pr = idx[jnp.arange(pop_size), jnp.argmax(f_total[idx], axis=1)]
         cn = jnp.full((pop_size, MAX_GENES, NODE_PARAMS), jnp.nan)
         cc = jnp.full((pop_size, MAX_GENES, CONN_PARAMS), jnp.nan)
         tc = jnp.zeros((pop_size, TAG_DIM))
-
         for i in range(pop_size // 2):
             p1, p2 = pr[i*2], pr[i*2+1]
             kx, ky, kt1, kt2 = random.split(random.fold_in(k2, i), 4)
             c1n, c1c = crossover_innov(state['nodes'][p1], state['conns'][p1],
-                                        state['nodes'][p1], state['conns'][p1],
-                                        state['nodes'][p2], state['conns'][p2],
-                                        f_total[p1], f_total[p2], kx)
+                state['nodes'][p1], state['conns'][p1],
+                state['nodes'][p2], state['conns'][p2], f_total[p1], f_total[p2], kx)
             c2n, c2c = crossover_innov(state['nodes'][p2], state['conns'][p2],
-                                        state['nodes'][p1], state['conns'][p1],
-                                        state['nodes'][p2], state['conns'][p2],
-                                        f_total[p1], f_total[p2], ky)
+                state['nodes'][p1], state['conns'][p1],
+                state['nodes'][p2], state['conns'][p2], f_total[p1], f_total[p2], ky)
             cn = cn.at[i*2].set(c1n); cn = cn.at[i*2+1].set(c2n)
             cc = cc.at[i*2].set(c1c); cc = cc.at[i*2+1].set(c2c)
             tc = tc.at[i*2].set(crossover_tags(nt[p1], nt[p2], kt1))
@@ -99,7 +135,6 @@ def run(n_gen=200, pop_size=128, seed=3072):
             delta = jnp.zeros((MAX_GENES, NODE_PARAMS)).at[:, 5].set(0.01 * td)
             cn = cn.at[i*2].set(cn[i*2] + delta)
             cn = cn.at[i*2+1].set(cn[i*2+1] + delta)
-
         cn, cc, ni = mutate(cn, cc, k2, state['innov'], .1*mr, .03*mr, .02*mr)
         tc = mutate_tags(tc, k2, noise=.03*mr)
         top2 = jnp.argsort(f_total)[-2:]
@@ -111,10 +146,14 @@ def run(n_gen=200, pop_size=128, seed=3072):
         state['tags'] = tc; state['innov'] = ni
 
         if (g + 1) % 20 == 0:
-            dt = time.time() - t0; eta = dt/(g+1)*(n_gen-g-1)/60
-            al = float(ae_loss)
+            dt = time.time() - t0; eta = dt/(g-gen_start+1)*(n_gen-g-1)/60
             print(f"G{g+1}: max={curve[-1][0]:.0f} mean={curve[-1][1]:.0f}"
-                  f" ae={al:.4f} mx={mr:.3f} [{dt:.0f}s ETA {eta:.0f}m]", flush=True)
+                  f" ae={ae_loss:.4f} mx={mr:.3f} [{dt:.0f}s ETA {eta:.0f}m]", flush=True)
+
+        if (g + 1) % 500 == 0 or g == n_gen - 1:
+            os.makedirs("checkpoints", exist_ok=True)
+            cp_path = f"checkpoints/cp_{g+1}.npz"
+            save_checkpoint(state, ae, g+1, curve, cp_path, hf_api, "thoan4965-ui/hybrid-mamba-atention-WM")
 
     k0 = random.PRNGKey(999)
     ffs = []
