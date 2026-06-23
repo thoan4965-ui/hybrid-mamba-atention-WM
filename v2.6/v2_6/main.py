@@ -37,15 +37,13 @@ def run(n_gen=200, pop_size=128, seed=3072):
 
     for g in range(n_gen):
         k0 = random.PRNGKey(g * 3)
-        fs, exs = [], []
+        fs, es, exs = [], [], []
         for ri in range(3):
             kk = random.split(random.fold_in(k0, ri), pop_size)
-            raw = eval_batch(state['nodes'], state['conns'], kk)
-            f = raw[:, 0]        # steps_alive
-            final_e = raw[:, 1]   # energy cuối
-            r = raw[:, 2:]        # mean(obs_29 + action_8 + energy_step)
-            fs.append(f); exs.append(r)
+            f, r = eval_batch(state['nodes'], state['conns'], kk)
+            es.append(r[:, 1]); exs.append(r[:, 2:]); fs.append(f)
         f = jnp.mean(jnp.stack(fs), axis=0)
+        final_e = jnp.mean(jnp.stack(es), axis=0)
         ex_raw = jnp.mean(jnp.stack(exs), axis=0)
 
         ae_input = jnp.concatenate([
@@ -115,8 +113,8 @@ def run(n_gen=200, pop_size=128, seed=3072):
     ffs = []
     for ri in range(3):
         kk = random.split(random.fold_in(k0, ri), pop_size)
-        raw = eval_batch(state['nodes'], state['conns'], kk)
-        ffs.append(raw[:, 0])
+        f, _ = eval_batch(state['nodes'], state['conns'], kk)
+        ffs.append(f)
     ff = jnp.mean(jnp.stack(ffs), axis=0)
     bi = int(jnp.argmax(ff))
     print(f"Best steps: {float(jnp.max(ff)):.0f}", flush=True)
