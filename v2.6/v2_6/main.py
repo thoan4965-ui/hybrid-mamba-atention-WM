@@ -1,4 +1,4 @@
-"""V2.9 — GA + Gradient + Hebbian + Dopamine + HF checkpoint."""
+"""V2.9.1 — GA + Gradient + Hebbian + Dopamine(5) + Modular + Non-coding + Dup."""
 import jax, jax.numpy as jnp, time, numpy as np, os
 from jax import random, jit, vmap, lax
 from v2_6.genome import (init_pop, mutate, crossover_innov, mutate_tags,
@@ -8,7 +8,6 @@ from v2_6.cppn import genome_to_policy, policy_forward
 from v2_6.env_ant import NoRewardAnt
 from v2_6.ae import init_ae, train_ae, encode, decode
 from v2_6.hebbian import hebbian_update
-
 from huggingface_hub import HfApi
 
 env = NoRewardAnt(backend='mjx', energy_init=20., energy_cost=0.4, torque_cost=0.05)
@@ -28,18 +27,19 @@ def eval_batch(nodes, conns, dopas, keys):
             a, pred_n = policy_forward(pol, s.obs)
             s2 = env.step(s, a)
 
-            wg, wh, wa = jax.nn.softmax(pol['w_dopa'] * 3)
+            temp = 1 + jnp.abs(pol['w_dopa'][3]) * 2
+            wg, wh, wa = jax.nn.softmax(pol['w_dopa'][:3] * temp)
             w_grad, w_hebb, w_ga = wg, wh, wa
+            lr_grad = 0.001 * (1 + jnp.abs(pol['w_dopa'][4]) * 9)
 
             pol = hebbian_update(pol, s.obs, scale=w_hebb)
 
             g_ih, g_pred = jax.grad(pred_loss, argnums=(0,1))(
                 pol['w_ih'], pol['w_pred'], s.obs, s2.obs)
-            lr = 0.001
-            pol['w_ih'] = pol['w_ih'] - lr * w_grad * jnp.clip(g_ih, -1., 1.)
-            pol['w_pred'] = pol['w_pred'] - lr * w_grad * jnp.clip(g_pred, -1., 1.)
+            pol['w_ih'] = pol['w_ih'] - lr_grad * w_grad * jnp.clip(g_ih, -1., 1.)
+            pol['w_pred'] = pol['w_pred'] - lr_grad * w_grad * jnp.clip(g_pred, -1., 1.)
 
-            pol['w_dopa'] = jnp.array([w_grad, w_hebb, w_ga])
+            pol['w_dopa'] = jnp.array([w_grad, w_hebb, w_ga, temp, lr_grad * 1000])
 
             return (pol, s2), (s2.done, jnp.concatenate([s.obs, a, s2.info['energy'][None]]))
         (pol, s_final), (d, ex) = lax.scan(step, (pol, env.reset(k)), jnp.arange(500))
@@ -98,8 +98,13 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
 
     if resume_path:
         state, ae, gen_start, curve = load_checkpoint(resume_path)
-        if 'dopas' not in state:
+        if 'dopas' not in state or state['dopas'].shape[1] < 5:
             state['dopas'] = init_dopas(random.PRNGKey(seed), state['pop_size'])
+        if state['nodes'].shape[-1] < NODE_PARAMS:
+            pad = jnp.zeros((state['nodes'].shape[0], MAX_GENES, NODE_PARAMS - state['nodes'].shape[-1]))
+            state['nodes'] = jnp.concatenate([state['nodes'], pad], axis=-1)
+            state['conns'] = jnp.concatenate([state['conns'],
+                jnp.zeros((state['conns'].shape[0], MAX_GENES, 0))], axis=-1)
         print(f"Resumed G{gen_start}, pop={state['pop_size']}", flush=True)
     else:
         ae_key, ga_key = random.split(key)
@@ -109,7 +114,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
         gen_start = 0; curve = []
         n4 = vmap(lambda i: random.PRNGKey(i))(jnp.arange(4))
         f4, _, _ = eval_batch(state['nodes'][:4], state['conns'][:4], state['dopas'][:4], n4)
-        print(f"V2.9+C+A: {n_gen}gen x {pop_size}pop", flush=True)
+        print(f"V2.9.1: {n_gen}gen x {pop_size}pop", flush=True)
 
     t0 = time.time()
     k0 = random.PRNGKey(gen_start * 3)
@@ -129,23 +134,18 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
         ae_input = jnp.concatenate([
             ex_raw[:, 29:37], f[:, None] / 500., ex_raw[:, 37:38]], axis=1)
 
-        skip_ae = float(jnp.mean(f)) < 7.
-        if not skip_ae:
-            ae = train_ae(ae, ae_input, random.PRNGKey(g + 1000))
-            dm_ae = jnp.mean(ae_input); ds_ae = jnp.std(ae_input) + 1e-3
-            ae_norm = jnp.clip((ae_input - dm_ae) / ds_ae, -3., 3.)
-            nt = vmap(lambda e: encode(ae, e))(ae_norm)
-            all_dec = vmap(lambda e: decode(ae, encode(ae, e)))(ae_norm)
-            per_loss = jnp.mean((ae_norm - all_dec) ** 2, axis=1)
-            range_ok = (jnp.max(per_loss) - jnp.min(per_loss)) > 0.05
-            dopamine = jnp.where(range_ok, (per_loss - jnp.min(per_loss)) / (jnp.max(per_loss) - jnp.min(per_loss) + 1e-8), 0.)
-            ae_loss = jnp.mean(per_loss)
-        else:
-            nt = jnp.zeros((pop_size, TAG_DIM)); dopamine = jnp.zeros(pop_size); ae_loss = 0.
+        ae = train_ae(ae, ae_input, random.PRNGKey(g + 1000))
+        dm_ae = jnp.mean(ae_input); ds_ae = jnp.std(ae_input) + 1e-3
+        ae_norm = jnp.clip((ae_input - dm_ae) / ds_ae, -3., 3.)
+        nt = vmap(lambda e: encode(ae, e))(ae_norm)
+        all_dec = vmap(lambda e: decode(ae, encode(ae, e)))(ae_norm)
+        per_loss = jnp.mean((ae_norm - all_dec) ** 2, axis=1)
+        dopamine = (per_loss - jnp.min(per_loss)) / (jnp.max(per_loss) - jnp.min(per_loss) + 1e-8)
+        ae_loss = jnp.mean(per_loss)
         f_total = f + 5 * dopamine
         curve.append((float(jnp.max(f_total)), float(jnp.mean(f_total))))
 
-        w_ga = float(dopa_mean[2])
+        w_ga = float(jnp.clip(dopa_mean[2], 0.05, 1.0))
         mr = w_ga
         k1, k2 = random.split(random.PRNGKey(g + seed))
         idx = random.randint(k1, (pop_size, 3), 0, pop_size)
@@ -174,7 +174,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
         tc = tc.at[0::2].set(ct_batch(nt[p1_arr], nt[p2_arr], kt_arr))
         tc = tc.at[1::2].set(ct_batch(nt[p2_arr], nt[p1_arr], ks_arr))
         cd_batch = vmap(crossover_dopas)
-        dc = jnp.zeros((pop_size, 3))
+        dc = jnp.zeros((pop_size, 5))
         dc = dc.at[0::2].set(cd_batch(state['dopas'][p1_arr], state['dopas'][p2_arr], kt_arr))
         dc = dc.at[1::2].set(cd_batch(state['dopas'][p2_arr], state['dopas'][p1_arr], ks_arr))
         td_arr = vmap(lambda p1, p2: jnp.tile(nt[p1] - nt[p2], 7)[:MAX_GENES])(p1_arr, p2_arr)
@@ -197,6 +197,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
             print(f"G{g+1}: max={curve[-1][0]:.0f} mean={curve[-1][1]:.0f}"
                   f" rmx={float(jnp.max(f)):.0f} rmn={float(jnp.mean(f)):.0f}"
                   f" ae={ae_loss:.4f} dopa={dopa_mean[0]:.2f}/{dopa_mean[1]:.2f}/{dopa_mean[2]:.2f}"
+                  f" temp={dopa_mean[3]:.2f} lr={dopa_mean[4]:.2f}"
                   f" [{dt:.0f}s ETA {eta:.0f}m]", flush=True)
 
         if (g + 1) % 500 == 0 or g == n_gen - 1:
@@ -214,7 +215,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
     print(f"Best steps (raw): {float(jnp.max(ff)):.0f}", flush=True)
     os.makedirs("v2_6/results", exist_ok=True)
     ts = time.strftime("%m%d_%H%M")
-    np.savez(f'v2_6/results/v29_{ts}.npz',
+    np.savez(f'v2_6/results/v291_{ts}.npz',
         curve=np.array(curve), best_nodes=np.array(state['nodes'][bi]),
         best_conns=np.array(state['conns'][bi]), best_fitness=float(jnp.max(ff)),
         best_total_fitness=float(curve[-1][0]))
