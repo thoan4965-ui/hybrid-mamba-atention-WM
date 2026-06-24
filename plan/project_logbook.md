@@ -3945,6 +3945,7 @@ Các bước implement V2.6 v1, mỗi bước hoàn thành trong 1-2 ngày:
   - **Tầng 3 (qua gen):** Tournament selection + crossover/mutate cả 2 genome + Elitism top 2.
   - **7 bugs đã fix:** float/int JIT, hebbian return thiếu, AE normalize, modular NaN, MJX NaN, dopamine collapse, temp/lr feedback.
   - **NaN prevention:** 3 lớp (MJX solver ε=3 + matmul precision high + nan_to_num mọi weight).
-  - **Kiến trúc mở:** thêm genome mới (sensor V2.7, body V2.8) = ~10 dòng/genome. Ko ảnh hưởng genome cũ.
+  - **Kiến trúc mở:** thêm genome mới (sensor V2.9.5, body) = ~10 dòng/genome. Ko ảnh hưởng genome cũ.
   - **File:** 6 files, ~513 dòng. Trên GitHub.
+  - **Roadmap V2.9.x:** 2→spatial memory, 3→planning, 4→imitation, 5→sensor evolution. V3 riêng (multi-agent social).
 

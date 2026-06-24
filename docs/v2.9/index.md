@@ -85,3 +85,18 @@ New genomes can be added independently (sensor V2.7, body V2.8):
 ## Limitation
 
 - valley of death: torque_cost=0.05 makes movement cost more than standing. Fitness stuck ~40.
+
+## Roadmap: V2.9.x (Neuroevolution + Learning)
+
+| Version | Thêm | Paper ref | Thời gian |
+|---|---|---|---|
+| **V2.9.1** (hiện tại) | Modular(8), non-coding, dup, dopamine adaptive, 2-genome | — | ✅ Done |
+| **V2.9.2** | **Spatial memory (grid cells)** — hippocampal-inspired place+grid cells for navigation | NEAT-NC 2025, REMI NeurIPS 2025 | ~2-3 ngày |
+| **V2.9.3** | **Planning (working memory)** — recurrence + tree search B×L, state prediction + evaluator | MAP Nature Comms 2025, EvoPlan ICLR 2026 | ~5-7 ngày |
+| **V2.9.4** | **Imitation learning** — mirror neurons + demo following, behavior cloning qua evolution | Mirror Neurons 2025, GANE 2024 | ~3-5 ngày |
+| **V2.9.5** | **Sensory evolution (exaptation)** — gene duplication cho sensor, derived obs từ base | Organ Evolution Annual Reviews 2024 | ~3-5 ngày |
+
+## V3 (separate project)
+
+Multi-agent social: overhead camera, 2+ agents, social learning, cooperation/competition.
+
