@@ -46,7 +46,8 @@ def mutate(nodes, conns, key, innov_start, subst=0.1, ins=0.03, dele=0.02):
         nr = jnp.where(jnp.arange(NODE_PARAMS) == 0, innov.astype(jnp.float32), nn[src])
         nr = jnp.where(jnp.arange(NODE_PARAMS) == 5, nr[5] + random.normal(k2, ()) * 0.1, nr)
         nr = jnp.where(jnp.arange(NODE_PARAMS) == 7, nn[src, 7], nr)
-        nn = jnp.where(do_ins & (jnp.arange(MAX_GENES) == na)[:, None], nr[None, :], nn)
+        ins_pos = na
+        nn = jnp.where(do_ins & (jnp.arange(MAX_GENES) == ins_pos)[:, None], nr[None, :], nn)
         sc = random.randint(k3, (), 0, jnp.maximum(ca, 1).astype(jnp.int32))
         nc = jnp.where(jnp.arange(CONN_PARAMS) == 0, (innov + 1).astype(jnp.float32), cc[sc])
         nc = jnp.where(jnp.arange(CONN_PARAMS) == 3, nc[3] + random.normal(k4, ()) * 0.1, nc)
@@ -57,14 +58,15 @@ def mutate(nodes, conns, key, innov_start, subst=0.1, ins=0.03, dele=0.02):
         # Gene duplication: copy node at src + its connections
         do_dup = (random.uniform(k1, ()) < 0.02) & (na < MAX_GENES - 2) & (ca < MAX_GENES - 2)
         dup_src = random.randint(k1, (), 0, jnp.maximum(na, 1).astype(jnp.int32))
-        dup_nr = jnp.where(jnp.arange(NODE_PARAMS) == 0, float(innov + added), nn[dup_src])
-        nn = jnp.where(do_dup & (jnp.arange(MAX_GENES) == na)[:, None], dup_nr[None, :], nn)
+        dup_pos = na + do_ins.astype(jnp.int32)
+        dup_nr = jnp.where(jnp.arange(NODE_PARAMS) == 0, (innov + added).astype(jnp.float32), nn[dup_src])
+        nn = jnp.where(do_dup & (jnp.arange(MAX_GENES) == dup_pos)[:, None], dup_nr[None, :], nn)
         # Find connections from dup_src and copy them
-        dup_conns = jnp.where(jnp.abs(c[i, :, 1] - float(dup_src)) < 0.5, c[i], jnp.nan)
+        dup_conns = jnp.where(jnp.abs(c[i, :, 1] - (dup_src).astype(jnp.float32)) < 0.5, c[i], jnp.nan)
         dup_conns_off = jnp.where(jnp.isnan(dup_conns[:, 0]), jnp.nan, jnp.zeros(8))
-        dup_conns_off = jnp.where(jnp.arange(CONN_PARAMS) == 0, float(innov + added + 1), dup_conns)
-        dup_conns_off = jnp.where(jnp.arange(CONN_PARAMS) == 1, float(na), dup_conns_off)
-        cc = jnp.where(do_dup & (jnp.arange(MAX_GENES) == ca)[:, None], dup_conns_off[None, :], cc.astype(jnp.float32))
+        dup_conns_off = jnp.where(jnp.arange(CONN_PARAMS) == 0, (innov + added + 1).astype(jnp.float32), dup_conns)
+        dup_conns_off = jnp.where(jnp.arange(CONN_PARAMS) == 1, (na).astype(jnp.float32), dup_conns_off)
+        cc = jnp.where(do_dup & (jnp.arange(MAX_GENES) == (ca + do_ins.astype(jnp.int32)))[:, None], dup_conns_off[None, :], cc.astype(jnp.float32))
         added_dup = do_dup * 2
         n = n.at[i].set(nn); c = c.at[i].set(cc)
         return (n, c, innov + added.astype(jnp.int32) + added_dup.astype(jnp.int32)), None
