@@ -1,6 +1,6 @@
 """V2.9.1 — GA + Gradient + Hebbian + Dopamine(5) + Modular + Non-coding + Dup."""
 import jax, jax.numpy as jnp, time, numpy as np, os
-jax.config.update('jax_default_matmul_precision', jax.lax.Precision.HIGH)
+jax.config.update('jax_default_matmul_precision', 'high')
 from jax import random, jit, vmap, lax
 from v2_6.genome import (init_pop, mutate, crossover_innov, mutate_tags,
                           crossover_tags, init_dopas, mutate_dopas, crossover_dopas,
