@@ -62,7 +62,7 @@ def save_checkpoint(state, ae, gen, curve, path, hf_api=None, hf_repo=None):
         gen=gen, curve=np.array(curve))
     if hf_api and hf_repo:
         try:
-            hf_api.upload_file(path_or_fileobj=path, path_in_repo=f"checkpoints/cp_{gen}.npz", repo_id=hf_repo)
+            hf_api.upload_file(path_or_fileobj=path, path_in_repo=f"checkpoints/v2.9/cp_{gen}.npz", repo_id=hf_repo)
             print(f"  Checkpoint G{gen} uploaded to HF", flush=True)
         except:
             print(f"  Warning: HF upload failed for G{gen}, checkpoint saved locally", flush=True)
@@ -81,7 +81,7 @@ def load_checkpoint(path):
 def download_latest_hf(api, repo_id, dest="."):
     try:
         files = api.list_repo_files(repo_id, token=api.token)
-        cps = sorted([f for f in files if f.startswith("checkpoints/cp_") and f.endswith(".npz")])
+        cps = sorted([f for f in files if f.startswith("checkpoints/v2.9/cp_") and f.endswith(".npz")])
         if not cps: return None
         return api.hf_hub_download(repo_id=repo_id, filename=cps[-1], local_dir=dest, token=api.token)
     except:
@@ -198,8 +198,8 @@ def run(n_gen=200, pop_size=128, seed=3072, resume_path=None):
                   f" [{dt:.0f}s ETA {eta:.0f}m]", flush=True)
 
         if (g + 1) % 500 == 0 or g == n_gen - 1:
-            os.makedirs("checkpoints", exist_ok=True)
-            cp_path = f"checkpoints/cp_{g+1}.npz"
+            os.makedirs("checkpoints/v2.9", exist_ok=True)
+            cp_path = f"checkpoints/v2.9/cp_{g+1}.npz"
             save_checkpoint(state, ae, g+1, curve, cp_path, hf_api, "hhian/checkpoints")
 
     ffs = []
@@ -211,7 +211,8 @@ def run(n_gen=200, pop_size=128, seed=3072, resume_path=None):
     bi = int(jnp.argmax(ff))
     print(f"Best steps (raw): {float(jnp.max(ff)):.0f}", flush=True)
     os.makedirs("v2_6/results", exist_ok=True)
-    np.savez('v2_6/results/v29_final.npz',
+    ts = time.strftime("%m%d_%H%M")
+    np.savez(f'v2_6/results/v29_{ts}.npz',
         curve=np.array(curve), best_nodes=np.array(state['nodes'][bi]),
         best_conns=np.array(state['conns'][bi]), best_fitness=float(jnp.max(ff)),
         best_total_fitness=float(curve[-1][0]))
