@@ -1,5 +1,6 @@
 """V2.9.1 — GA + Gradient + Hebbian + Dopamine(5) + Modular + Non-coding + Dup."""
 import jax, jax.numpy as jnp, time, numpy as np, os
+jax.config.update('jax_default_matmul_precision', jax.lax.Precision.HIGH)
 from jax import random, jit, vmap, lax
 from v2_6.genome import (init_pop, mutate, crossover_innov, mutate_tags,
                           crossover_tags, init_dopas, mutate_dopas, crossover_dopas,
@@ -11,6 +12,10 @@ from v2_6.hebbian import hebbian_update
 from huggingface_hub import HfApi
 
 env = NoRewardAnt(backend='mjx', energy_init=20., energy_cost=0.4, torque_cost=0.05)
+if hasattr(env, 'sys') and hasattr(env.sys, 'mj_model'):
+    env.sys.mj_model.opt.iterations = 3
+    env.sys.mj_model.opt.ls_iterations = 5
+    env.sys.mj_model.opt.timestep = 0.001
 
 def pred_loss(w_ih, w_pred, obs, target):
     h = jnp.tanh(obs @ w_ih[:-1] + w_ih[-1])
