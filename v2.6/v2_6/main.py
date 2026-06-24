@@ -47,7 +47,7 @@ def eval_batch(nodes, conns, dopas, keys):
 
             for k in pol: pol[k] = jnp.nan_to_num(pol[k], 0.)
 
-            pol['w_dopa'] = jnp.array([w_grad, w_hebb, w_ga, temp, lr_grad * 1000])
+            pol['w_dopa'] = jnp.array([w_grad, w_hebb, w_ga, 0., 0.])
 
             return (pol, s2), (s2.done, jnp.concatenate([s.obs, a, s2.info['energy'][None]]))
         (pol, s_final), (d, ex) = lax.scan(step, (pol, env.reset(k)), jnp.arange(500))
@@ -210,7 +210,6 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
             print(f"G{g+1}: max={curve[-1][0]:.0f} mean={curve[-1][1]:.0f}"
                   f" rmx={float(jnp.max(f)):.0f} rmn={float(jnp.mean(f)):.0f}"
                   f" ae={ae_loss:.4f} dopa={dopa_mean[0]:.2f}/{dopa_mean[1]:.2f}/{dopa_mean[2]:.2f}"
-                  f" temp={dopa_mean[3]:.2f} lr={dopa_mean[4]:.2f}"
                   f" [{dt:.0f}s ETA {eta:.0f}m]", flush=True)
 
         if (g + 1) % 500 == 0 or g == n_gen - 1:
