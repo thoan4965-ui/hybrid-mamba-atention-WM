@@ -128,9 +128,11 @@ def run(n_gen=200, pop_size=128, seed=3072, resume_path=None):
         skip_ae = float(jnp.mean(f)) < 7.
         if not skip_ae:
             ae = train_ae(ae, ae_input, random.PRNGKey(g + 1000))
-            nt = vmap(lambda e: encode(ae, e))(ae_input)
-            all_dec = vmap(lambda e: decode(ae, encode(ae, e)))(ae_input)
-            per_loss = jnp.mean((ae_input - all_dec) ** 2, axis=1)
+            dm_ae = jnp.mean(ae_input); ds_ae = jnp.std(ae_input) + 1e-3
+            ae_norm = jnp.clip((ae_input - dm_ae) / ds_ae, -3., 3.)
+            nt = vmap(lambda e: encode(ae, e))(ae_norm)
+            all_dec = vmap(lambda e: decode(ae, encode(ae, e)))(ae_norm)
+            per_loss = jnp.mean((ae_norm - all_dec) ** 2, axis=1)
             dopamine = per_loss / (jnp.max(per_loss) + 1e-8)
             ae_loss = jnp.mean(per_loss)
         else:
