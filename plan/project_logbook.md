@@ -3931,5 +3931,20 @@ Các bước implement V2.6 v1, mỗi bước hoàn thành trong 1-2 ngày:
   - **Checkpoint HF:** auto mỗi 500 gen → hhian/checkpoints. Resume tự động.
 - **24/06 — V2.9 test:** 40 gen × 128 pop. Dopamine phân hóa G20: 0.12/0.67/0.21 (gradient thấp, hebbian cao, GA thấp). Fitness 76. AE loss giảm dần.
 - **24/06 — Quality over Quickfix rule:** Thêm vào AGENTS.md (local + global). Fix root cause, ko workaround, ko revert feature, test verify 50 gen.
-- **24/06 — V2.9.1 modular fix:** Connection module_id đồng bộ với source node. Init + insertion đều đúng. Chờ test 50 gen.
+- **24/06 — V2.9.1 modular fix:** Connection module_id đồng bộ với source node. Init + insertion đều đúng.
+- **24/06 — V2.9.1 HOÀN CHỈNH — 2 GENOME ARCHITECTURE:**
+  - **Kiến trúc:** 1 cá thể = 2 genome riêng, 1 fitness chung.
+    - **Genome chính (100×8 params)** → CPPN (8 modular) → policy + prediction weights
+    - **2nd genome (5 floats/agent)** → dopamine: base(w_grad,w_hebb,w_ga) + sensitivity + lr_grad
+  - **4 cơ chế song song trong 500 steps:**
+    - **GA** — JIT mutate (scan) + vmap crossover (module-aware)
+    - **Gradient** — prediction error backprop → world model (scale = w_grad × lr_grad)
+    - **Hebbian** — synaptic plasticity (scale = w_hebb)
+    - **Dopamine** — thích nghi mỗi step: `adapt = tanh(sensitivity × pred_error)`, `softmax(base + [adapt,-adapt,0])`
+  - **Tầng 2 (cuối gen):** AE (10→16→10) → Tag + Lamarckian. Fitness = steps_alive + 5×AE_loss_norm.
+  - **Tầng 3 (qua gen):** Tournament selection + crossover/mutate cả 2 genome + Elitism top 2.
+  - **7 bugs đã fix:** float/int JIT, hebbian return thiếu, AE normalize, modular NaN, MJX NaN, dopamine collapse, temp/lr feedback.
+  - **NaN prevention:** 3 lớp (MJX solver ε=3 + matmul precision high + nan_to_num mọi weight).
+  - **Kiến trúc mở:** thêm genome mới (sensor V2.7, body V2.8) = ~10 dòng/genome. Ko ảnh hưởng genome cũ.
+  - **File:** 6 files, ~513 dòng. Trên GitHub.
 

@@ -1,82 +1,87 @@
-# V2.9 — GA + Gradient + Hebbian + Dopamine
+# V2.9.1 — 2-Genome Architecture (GA + Gradient + Hebbian + Dopamine)
 
 ## Overview
 
-Neuroevolution action-only with 4 parallel learning mechanisms orchestrated by evolved dopamine weights. No reward function. No gradient. Survival + curiosity fitness.
+Neuroevolution with 4 parallel learning mechanisms. 2 independent genomes, 1 shared fitness. No reward function. Modular (8 modules), non-coding DNA, gene duplication.
 
 ## Files
 
 | File | Lines | Role |
 |---|---|---|
 | ae.py | 24 | Autoencoder 10→16→10, NaN-safe |
-| cppn.py | 52 | CPPN → policy + prediction + dopamine weights |
+| cppn.py | 62 | CPPN → policy (30→10→8) + prediction (10→29) + 8 modular |
 | env_ant.py | 56 | NoRewardAnt, 3 rings, 6 foods, energy=20 |
-| genome.py | 93 | JIT mutate (scan), vmap crossover, 2nd genome for dopamine |
-| hebbian.py | 13 | Hebbian update with scale (w_hebb), returns all 4 keys |
-| main.py | 215 | Run loop: GA + gradient + hebbian + dopamine + HF checkpoint |
-| render_video.py | 55 | Video render with food overlay |
+| genome.py | 121 | JIT mutate (scan), vmap crossover, Tag, 2nd-genome(5), modular, non-coding, dup |
+| hebbian.py | 13 | Hebbian update with scale (w_hebb), returns 4 keys |
+| main.py | 237 | Run loop: GA + gradient + hebbian + dopamine(adaptive) + HF checkpoint |
 
-## Architecture
+## 2-Genome Architecture
 
-### 3-tier learning
+```
+Agent:
+  ├── Genome chính (100×8 params) → CPPN → policy + prediction weights
+  └── 2nd genome (5 floats)        → dopamine: base[0:2] + sensitivity[3] + lr[4]
 
-1. **500 steps (1 gen)**
-   - `policy_forward` → `[action, pred_next_obs]`
-   - Hebbian update (scale = w_hebb)
-   - Gradient backprop (scale = w_grad) on `||next_obs - pred_next||²`
-   - Both update shared w_ih — balanced by dopamine
+Fitness = steps_alive + 5 × AE_loss_norm (cho cả 2 genome)
+```
 
-2. **End of gen**
-   - AE: encode action(8)+fitness+energy → 16-dim tag
-   - Dopamine bonus = AE loss → curiosity fitness
-   - `f_total = steps_alive + 50 × dopamine`
+Each genome has independent crossover, mutation, init. Same fitness drives both.
 
-3. **Across generations**
-   - Tournament selection
-   - Crossover: genome(100) + tag(16) + dopa(3)
-   - JIT mutate (lax.scan) + vmap crossover
-   - Elitism (top 2)
-   - Lamarckian: tag diff → genome bias
+## 4 Mechanisms (500 steps)
 
-### Dopamine (2nd genome)
+### GA (genome mutation + crossover)
+- mutate: subst(nodes/conns bias/weight) + ins(node+conn) + dele(conn) + expr(non-coding) + module_id + dup(copy node+conns)
+- crossover_innov: innovation-aligned, module-aware (same module → random pick, disjoint → fitter parent)
+- JIT: mutate via lax.scan, crossover via vmap
 
-- 3 floats per agent, evolved independently of main genome
-- `softmax(dopa × 3)` → w_grad, w_hebb, w_ga
-- w_grad: gradient update strength [0,1]
-- w_hebb: hebbian update strength [0,1]
-- w_ga: GA mutation rate (replaces Mechanism X)
+### Gradient (world model)
+- `pred_loss = ||next_obs - pred_next_obs||²` → jax.grad wrt w_ih, w_pred
+- Update: `w -= lr_grad × w_grad × clip(grad, -1, 1)`
 
-## Key parameters
+### Hebbian (online adaptation)
+- `dw = w_hebb × η × outer(pre, post - tanh(post))`
+- Clip: ±0.001 per step, weights bounded [-2, 2]
 
-| Param | Value |
+### Dopamine (adaptive coordinator)
+```python
+pred_error = ||next_obs - pred_next||²
+adapt = tanh(sensitivity × pred_error)  # per-step adaptation
+w_grad, w_hebb, w_ga = softmax(base + [adapt, -adapt, 0])
+```
+
+## Environment
+
+| Param | Value | Effect |
+|---|---|---|
+| energy_init | 20 | Baseline survival ~50 steps |
+| energy_cost | 0.4 | Base cost per step |
+| torque_cost | 0.05 | Movement penalty (valley of death) |
+| food_energy | 50 | +50 per eaten unit |
+| rings | 3 (bk=5,10,15) | 6 food total, NO respawn |
+
+## NaN Prevention
+
+| Fix | Location |
 |---|---|
-| energy_init | 20 |
-| energy_cost | 0.4 |
-| torque_cost | 0.05 |
-| food_energy | 50 |
-| rings | 3 (bk=5,10,15) |
-| foods total | 6 (2 per ring) |
-| MAX_GENES | 100 |
-| AE dim | 10→16→10 |
-| TAG_DIM | 16 |
-| lr_gradient | 0.001 |
-| lr_ae | 0.001 |
-| AE steps | 30 |
-| Multi-eval | 3 seeds |
+| `jax_default_matmul_precision = 'high'` | main.py:3 |
+| `mj_model.opt.iterations = 3` | main.py:16 |
+| `nan_to_num(s2.obs)` | main.py:35 |
+| `for k in pol: nan_to_num(pol[k])` | main.py:50 |
+| `nan_to_num(d, 1.) / ex / dopa / nt` | main.py:56-155 |
 
-## Checkpoint
+## Checkpoint + Resume
 
-- Auto save every 500 gen
-- HF repo: `hhian/checkpoints`
-- Resume: downloads latest checkpoint, continues
-- Files: `checkpoints/cp_{gen}.npz`
+- Save: every 500 gen → `checkpoints/v2.9/cp_{gen}.npz`
+- Upload: HF `hhian/checkpoints/checkpoints/v2.9/cp_{gen}.npz`
+- Resume: `download_latest_hf` → filter `checkpoints/v2.9/cp_*.npz` → load latest
+- Backward compatibility: pad nodes 7→8, dope 3→5
 
-## Bug history (all fixed)
+## Open Architecture
 
-1. float(innov) in JIT scan → innov.astype(float32)
-2. int(innov) in JIT → convert at caller
-3. hebbian_update missing w_pred, w_dopa in return
-4. AE encode/decode using raw data instead of normalized
-5. render_video env.step receiving tuple
-6. expression.py dead (mechanism_x removed)
-7. Checkpoint missing dopas + backward compat
+New genomes can be added independently (sensor V2.7, body V2.8):
+- 3 lines for init + 3 for crossover + 3 for mutate + 1 for checkpoint ≈ 10 lines/genome
+- Independent evolution, shared fitness
+
+## Limitation
+
+- valley of death: torque_cost=0.05 makes movement cost more than standing. Fitness stuck ~40.
