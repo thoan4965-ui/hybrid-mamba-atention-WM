@@ -99,7 +99,12 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
     if resume_path:
         state, ae, gen_start, curve = load_checkpoint(resume_path)
         if 'dopas' not in state or state['dopas'].shape[1] < 5:
-            state['dopas'] = init_dopas(random.PRNGKey(seed), state['pop_size'])
+            if 'dopas' in state and state['dopas'].shape[1] == 3:
+                old3 = state['dopas']
+                new2 = init_dopas(random.PRNGKey(seed), state['pop_size'])[:, 3:]
+                state['dopas'] = jnp.concatenate([old3, new2], axis=1)
+            else:
+                state['dopas'] = init_dopas(random.PRNGKey(seed), state['pop_size'])
         if state['nodes'].shape[-1] < NODE_PARAMS:
             pad = jnp.zeros((state['nodes'].shape[0], MAX_GENES, NODE_PARAMS - state['nodes'].shape[-1]))
             state['nodes'] = jnp.concatenate([state['nodes'], pad], axis=-1)
