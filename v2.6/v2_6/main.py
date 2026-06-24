@@ -79,10 +79,13 @@ def load_checkpoint(path):
     return state, ae, int(d['gen']), list(d['curve'])
 
 def download_latest_hf(api, repo_id, dest="."):
-    files = api.list_repo_files(repo_id, token=api.token)
-    cps = sorted([f for f in files if f.startswith("checkpoints/")])
-    if not cps: return None
-    return api.hf_hub_download(repo_id=repo_id, filename=cps[-1], local_dir=dest, token=api.token)
+    try:
+        files = api.list_repo_files(repo_id, token=api.token)
+        cps = sorted([f for f in files if f.startswith("checkpoints/cp_") and f.endswith(".npz")])
+        if not cps: return None
+        return api.hf_hub_download(repo_id=repo_id, filename=cps[-1], local_dir=dest, token=api.token)
+    except:
+        return None
 
 def run(n_gen=200, pop_size=128, seed=3072, resume_path=None):
     key = random.PRNGKey(seed)
