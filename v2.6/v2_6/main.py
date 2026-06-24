@@ -34,8 +34,9 @@ def eval_batch(nodes, conns, dopas, keys):
             s2 = env.step(s, a)
             s2 = s2.replace(obs=jnp.nan_to_num(s2.obs, 0.))
 
-            temp = 1 + jnp.abs(d0[3]) * 2
-            wg, wh, wa = jax.nn.softmax(pol['w_dopa'][:3] * temp)
+            pred_error = jnp.mean((s2.obs - pred_n) ** 2)
+            adapt = jnp.tanh(jnp.abs(d0[3]) * pred_error)
+            wg, wh, wa = jax.nn.softmax(d0[:3] + jnp.array([adapt, -adapt, 0.]))
             w_grad, w_hebb, w_ga = wg, wh, wa
             lr_grad = 0.001 * (1 + jnp.abs(d0[4]) * 9)
 
