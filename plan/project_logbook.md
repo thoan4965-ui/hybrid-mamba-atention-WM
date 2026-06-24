@@ -3930,6 +3930,6 @@ Các bước implement V2.6 v1, mỗi bước hoàn thành trong 1-2 ngày:
   - **7 files:** ae.py(24), cppn.py(52), env_ant.py(56), genome.py(93), hebbian.py(13), render_video.py(55), main.py(215). Tổng ~508 dòng.
   - **Checkpoint HF:** auto mỗi 500 gen → hhian/checkpoints. Resume tự động.
 - **24/06 — V2.9 test:** 40 gen × 128 pop. Dopamine phân hóa G20: 0.12/0.67/0.21 (gradient thấp, hebbian cao, GA thấp). Fitness 76. AE loss giảm dần.
-- **24/06 — SKILLS (17 global):** agent-manager, code-discipline, cognitive-auditor, meta-generalizer, research-debug, research-paper, master-verification, paper-linker, theory-emergence-toolkit, logbook-manager, doc-reader, workflow-manager, big-picture-checker, git-push-safe, precision-agent + customize-opencode.
-- **24/06 — Lộ trình:** V2.9 → V3 social (camera overhead + multi-agent) — sauu khi V2.9 hoàn tất.
+- **24/06 — Quality over Quickfix rule:** Thêm vào AGENTS.md (local + global). Fix root cause, ko workaround, ko revert feature, test verify 50 gen.
+- **24/06 — V2.9.1 modular fix:** Connection module_id đồng bộ với source node. Init + insertion đều đúng. Chờ test 50 gen.
 
