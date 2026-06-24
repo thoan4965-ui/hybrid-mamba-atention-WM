@@ -27,16 +27,17 @@ def eval_batch(nodes, conns, dopas, keys):
     def single(n, c, d, k):
         pol = genome_to_policy(n, c)
         pol['w_dopa'] = d
+        d0 = d
         def step(ps, _):
             pol, s = ps
             a, pred_n = policy_forward(pol, s.obs)
             s2 = env.step(s, a)
             s2 = s2.replace(obs=jnp.nan_to_num(s2.obs, 0.))
 
-            temp = 1 + jnp.abs(pol['w_dopa'][3]) * 2
+            temp = 1 + jnp.abs(d0[3]) * 2
             wg, wh, wa = jax.nn.softmax(pol['w_dopa'][:3] * temp)
             w_grad, w_hebb, w_ga = wg, wh, wa
-            lr_grad = 0.001 * (1 + jnp.abs(pol['w_dopa'][4]) * 9)
+            lr_grad = 0.001 * (1 + jnp.abs(d0[4]) * 9)
 
             pol = hebbian_update(pol, s.obs, scale=w_hebb)
 
