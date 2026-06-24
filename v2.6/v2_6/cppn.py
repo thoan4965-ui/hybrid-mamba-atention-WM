@@ -12,7 +12,8 @@ def cppn_query(nodes, conns, coords):
             v,_=vc; has=is_conn[ci]
             si=jnp.argmax(is_node*(jnp.abs(nodes[:,0]-conns[ci,1])<0.01))
             di=jnp.argmax(is_node*(jnp.abs(nodes[:,0]-conns[ci,2])<0.01))
-            v=v.at[di].add(conns[ci,3]*jnp.tanh(v[si])*has+nodes[di,5]*has)
+            update = jnp.where(has, conns[ci,3]*jnp.tanh(v[si])+nodes[di,5], 0.)
+            v=v.at[di].add(update)
             return(v,ci),None
         (v,_),_=lax.scan(sf,(v,0),jnp.arange(100))
         last=jnp.clip(jnp.sum(is_node)-1,0).astype(jnp.int32)
