@@ -32,103 +32,104 @@ def pred_loss(w_ih, w_pred, obs, target):
     pred = h @ w_pred
     return jnp.mean((target - pred) ** 2)
 
-@jit
-def eval_batch(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, thoughts, keys,
-               flag_spatial=False, flag_planning=False, flag_diag=False, flag_mirror=False,
-               flag_thought=False, elite_data=None):
+def make_eval_batch(flag_spatial=False, flag_planning=False, flag_diag=False, flag_mirror=False, flag_thought=False):
+    """Factory: flags are Python constants (closure), not JIT-traced args."""
     TOKEN_DIM = 16
+    B_MAX = 10
+    L_MAX = 20
 
-    def single(n, c, d, r, sp, pl, dg, mi, th, k):
-        pol = genome_to_policy(n, c, regs=r)
-        pol['w_dopa'] = d
-        d0 = d
+    @jit
+    def eval_batch(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, thoughts, keys, elite_data=None):
+        def single(n, c, d, r, sp, pl, dg, mi, th, k):
+            pol = genome_to_policy(n, c, regs=r)
+            pol['w_dopa'] = d
+            d0 = d
 
-        # Planning params
-        B_beam = int(3 + 7 * jax.nn.sigmoid(pl[0])) if flag_planning else 1
-        L_horizon = int(5 + 15 * jax.nn.sigmoid(pl[1])) if flag_planning else 1
-        plan_noise = 0.1 + 0.4 * jax.nn.sigmoid(pl[2]) if flag_planning else 0.
+            # Planning: fixed shapes B_MAX×L_MAX, mask unused
+            plan_noise = 0.1 + 0.4 * jax.nn.sigmoid(pl[2]) if flag_planning else 0.
 
-        # Mirror / elite imitation params
-        mirror_lr = 0.001 + 0.009 * jax.nn.sigmoid(mi[3]) if flag_mirror else 0.
-        mirror_select = 1.0 + jax.nn.sigmoid(mi[2]) if flag_mirror else 99.
+            # Mirror params
+            mirror_lr = 0.001 + 0.009 * jax.nn.sigmoid(mi[3]) if flag_mirror else 0.
+            mirror_select = 1.0 + jax.nn.sigmoid(mi[2]) if flag_mirror else 99.
 
-        # Thought params
-        thought_scale = jax.nn.sigmoid(th[0]) * 0.5 if flag_thought else 0.
-        thought_decay = 0.1 + 0.9 * jax.nn.sigmoid(th[1]) if flag_thought else 1.
+            # Thought params
+            thought_scale = jax.nn.sigmoid(th[0]) * 0.5 if flag_thought else 0.
+            thought_decay = 0.1 + 0.9 * jax.nn.sigmoid(th[1]) if flag_thought else 1.
 
-        # Elite data: weight-level alignment (flattened w_ih)
-        use_elite = (elite_data is not None and flag_mirror)
-        e_wih = elite_data['wih'] if use_elite else jnp.zeros(1)
-        e_fit = elite_data['fitness'] if use_elite else 0.
+            # Elite data: tuple (wih, fitness), JIT-safe
+            use_elite = (elite_data is not None and flag_mirror)
+            e_wih = elite_data[0] if use_elite else jnp.zeros(1)
+            e_fit = elite_data[1] if use_elite else 0.
 
-        def step(carry, _):
-            pol, s, thought_state = carry
-            obs_i = s.obs
+            def step(carry, _):
+                pol, s, thought_state = carry
+                obs_i = s.obs
 
-            # Inner speech: fixed 16-dim thought token
-            if flag_thought:
-                h = jnp.tanh(obs_i @ pol['w_ih'][:-1] + pol['w_ih'][-1])
-                new_thought = jnp.tanh(h[:, None] * jnp.ones(TOKEN_DIM)[None, :]).mean(0)  # 16-dim from h
-                thought_state = thought_state * thought_decay + new_thought * (1 - thought_decay)
-                obs_i = jnp.concatenate([obs_i, thought_state * thought_scale])
+                # Inner speech
+                if flag_thought:
+                    h = jnp.tanh(obs_i @ pol['w_ih'][:-1] + pol['w_ih'][-1])
+                    new_thought = jnp.tanh(h[:, None] * jnp.ones(TOKEN_DIM)[None, :]).mean(0)
+                    thought_state = thought_state * thought_decay + new_thought * (1 - thought_decay)
+                    obs_i = jnp.concatenate([obs_i, thought_state * thought_scale])
 
-            # Spatial encoding
-            if flag_spatial:
-                x = s.pipeline_state.x.pos[0, 0]
-                y = s.pipeline_state.x.pos[0, 1]
-                spat_enc = spatial_encoding(x, y, scale=jax.nn.sigmoid(sp[0]))
-                obs_i = jnp.concatenate([obs_i, spat_enc])
+                # Spatial
+                if flag_spatial:
+                    x = s.pipeline_state.x.pos[0, 0]
+                    y = s.pipeline_state.x.pos[0, 1]
+                    spat_enc = spatial_encoding(x, y, scale=jax.nn.sigmoid(sp[0]))
+                    obs_i = jnp.concatenate([obs_i, spat_enc])
 
-            a, pred_n = policy_forward(pol, obs_i)
-            s2 = env.step(s, a)
-            s2 = s2.replace(obs=jnp.nan_to_num(s2.obs, 0.))
+                a, pred_n = policy_forward(pol, obs_i)
+                s2 = env.step(s, a)
+                s2 = s2.replace(obs=jnp.nan_to_num(s2.obs, 0.))
 
-            pred_error = jnp.mean((s2.obs - pred_n) ** 2)
-            adapt = jnp.tanh(jnp.abs(d0[3]) * pred_error)
-            wg, wh, wa = jax.nn.softmax(d0[:3] + jnp.array([adapt, -adapt, 0.]))
-            w_grad, w_hebb, w_ga = wg, wh, wa
-            lr_grad = 0.001 * (1 + jnp.abs(d0[4]) * 9)
+                pred_error = jnp.mean((s2.obs - pred_n) ** 2)
+                adapt = jnp.tanh(jnp.abs(d0[3]) * pred_error)
+                wg, wh, wa = jax.nn.softmax(d0[:3] + jnp.array([adapt, -adapt, 0.]))
+                w_grad, w_hebb, w_ga = wg, wh, wa
+                lr_grad = 0.001 * (1 + jnp.abs(d0[4]) * 9)
 
-            pol = hebbian_update(pol, s.obs, scale=w_hebb)
+                pol = hebbian_update(pol, s.obs, scale=w_hebb)
 
-            g_ih, g_pred = jax.grad(pred_loss, argnums=(0,1))(
-                pol['w_ih'], pol['w_pred'], obs_i, s2.obs)
-            pol['w_ih'] = pol['w_ih'] - lr_grad * w_grad * jnp.clip(g_ih, -1., 1.)
-            pol['w_pred'] = pol['w_pred'] - lr_grad * w_grad * jnp.clip(g_pred, -1., 1.)
+                g_ih, g_pred = jax.grad(pred_loss, argnums=(0,1))(
+                    pol['w_ih'], pol['w_pred'], obs_i, s2.obs)
+                pol['w_ih'] = pol['w_ih'] - lr_grad * w_grad * jnp.clip(g_ih, -1., 1.)
+                pol['w_pred'] = pol['w_pred'] - lr_grad * w_grad * jnp.clip(g_pred, -1., 1.)
 
-            for k in pol: pol[k] = jnp.nan_to_num(pol[k], 0.)
-            pol['w_dopa'] = jnp.array([w_grad, w_hebb, w_ga, 0., 0.])
+                for k in pol: pol[k] = jnp.nan_to_num(pol[k], 0.)
+                pol['w_dopa'] = jnp.array([w_grad, w_hebb, w_ga, 0., 0.])
 
-            # Planning
-            if flag_planning and B_beam > 1:
-                k_plan = random.fold_in(k, int(s2.info['step']))
-                act_noise = random.normal(k_plan, (B_beam, L_horizon, 8)) * plan_noise
-                def rollout_one(acts):
-                    ss = s2; err = 0.
-                    for step_i in range(L_horizon):
-                        _, pn = policy_forward(pol, ss.obs)
-                        ss2 = env.step(ss, acts[step_i]); err += jnp.mean((ss2.obs - pn) ** 2); ss = ss2
-                    return err
-                errs = vmap(rollout_one)(act_noise)
-                a = act_noise[jnp.argmin(errs), 0]
+                # Planning: fixed B_MAX×L_MAX with masking
+                if flag_planning:
+                    k_plan = random.fold_in(k, int(s2.info['step']))
+                    acts = random.normal(k_plan, (B_MAX, L_MAX, 8)) * plan_noise
+                    def rollout_one(acts_seq):
+                        ss = s2; err = 0.
+                        for step_i in range(L_MAX):
+                            _, pn = policy_forward(pol, ss.obs)
+                            ss2 = env.step(ss, acts_seq[step_i]); err += jnp.mean((ss2.obs - pn) ** 2); ss = ss2
+                        return err
+                    errs = vmap(rollout_one)(acts)
+                    a = acts[jnp.argmin(errs), 0]
 
-            # Elite-based imitation: weight-level alignment (no obs matching)
-            if use_elite and e_fit > mirror_select and e_wih.shape[0] > 1:
-                align_loss = mirror_lr * jnp.mean((pol['w_ih'] - e_wih) ** 2)
-                pol['w_ih'] = pol['w_ih'] - jnp.clip(align_loss * (pol['w_ih'] - e_wih) * 0.01, -0.005, 0.005)
+                # Elite imitation: weight-level alignment
+                if use_elite and e_fit > mirror_select and e_wih.shape[0] > 1:
+                    align_loss = mirror_lr * jnp.mean((pol['w_ih'] - e_wih) ** 2)
+                    pol['w_ih'] = pol['w_ih'] - jnp.clip(align_loss * (pol['w_ih'] - e_wih) * 0.01, -0.005, 0.005)
 
-            return (pol, s2, thought_state), (s2.done, jnp.concatenate([obs_i, a, s2.info['energy'][None]]))
-        ts_init = jnp.zeros(TOKEN_DIM) if flag_thought else jnp.zeros(1)
-        (pol, s_final, final_ts), (d, ex) = lax.scan(step, (pol, env.reset(k), ts_init), jnp.arange(500))
-        d = jnp.nan_to_num(d, nan=1.)
-        ex = jnp.nan_to_num(ex, nan=0.)
-        fd = jnp.argmax(d > 0.5)
-        alive = jnp.where(jnp.any(d > 0.5), fd + 1., 500.)
-        final_energy = jnp.nan_to_num(s_final.info['energy'], nan=0.)
-        dopa = jnp.nan_to_num(pol['w_dopa'], 0.)
-        return (alive, dopa, final_ts), jnp.concatenate([alive[None], final_energy[None], jnp.mean(ex, 0)])
-    (alive_arr, dopa_arr, thought_arr), r = vmap(single)(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, thoughts, keys)
-    return alive_arr, dopa_arr, thought_arr, r
+                return (pol, s2, thought_state), (s2.done, jnp.concatenate([obs_i, a, s2.info['energy'][None]]))
+            ts_init = jnp.zeros(TOKEN_DIM) if flag_thought else jnp.zeros(1)
+            (pol, s_final, final_ts), (d, ex) = lax.scan(step, (pol, env.reset(k), ts_init), jnp.arange(500))
+            d = jnp.nan_to_num(d, nan=1.)
+            ex = jnp.nan_to_num(ex, nan=0.)
+            fd = jnp.argmax(d > 0.5)
+            alive = jnp.where(jnp.any(d > 0.5), fd + 1., 500.)
+            final_energy = jnp.nan_to_num(s_final.info['energy'], nan=0.)
+            dopa = jnp.nan_to_num(pol['w_dopa'], 0.)
+            return (alive, dopa, final_ts), jnp.concatenate([alive[None], final_energy[None], jnp.mean(ex, 0)])
+        (alive_arr, dopa_arr, thought_arr), r = vmap(single)(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, thoughts, keys)
+        return alive_arr, dopa_arr, thought_arr, r
+    return eval_batch
 
 def save_checkpoint(state, ae, gen, curve, path, hf_api=None, hf_repo=None):
     np.savez(path,
@@ -196,6 +197,9 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
     mirror_key = random.PRNGKey(seed + 13)
     thought_key = random.PRNGKey(seed + 14)
 
+    # Create eval_batch with flags as closure (JIT-safe)
+    eval_batch_fn = make_eval_batch(flag_spatial, flag_planning, flag_diag, flag_mirror, flag_thought)
+
     if resume_path:
         state, ae, gen_start, curve = load_checkpoint(resume_path)
         pad_genome = lambda key, arr, dim: arr if (arr.shape[1] >= dim and arr.shape[0] > 1) else jnp.zeros((state['pop_size'], dim))
@@ -241,7 +245,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
 
     # Pre-check
     n4 = vmap(lambda i: random.PRNGKey(i))(jnp.arange(4))
-    f4, _, _, _ = eval_batch(state['nodes'][:4], state['conns'][:4],
+    f4, _, _, _ = eval_batch_fn(state['nodes'][:4], state['conns'][:4],
         state['dopas'][:4], state['regs'][:4],
         state['spacials'][:4], state['plans'][:4],
         state['diags'][:4], state['mirrors'][:4], state['thoughts'][:4], n4,
@@ -256,7 +260,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
         fs, dopas, regss, rss, thoughtss = [], [], [], [], []
         for ri in range(1):
             kk = random.split(random.fold_in(k0, ri), pop_size)
-            f_arr, d_arr, th_arr, r = eval_batch(state['nodes'], state['conns'],
+            f_arr, d_arr, th_arr, r = eval_batch_fn(state['nodes'], state['conns'],
                 state['dopas'], state['regs'],
                 state['spacials'], state['plans'],
                 state['diags'], state['mirrors'], state['thoughts'], kk,
@@ -291,7 +295,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
             elite_fitness = float(f_total[best_idx])
             bi = best_idx
             pol_e = genome_to_policy(state['nodes'][bi], state['conns'][bi], regs=state['regs'][bi])
-            elite_data = {'wih': pol_e['w_ih'], 'fitness': elite_fitness}
+            elite_data = (pol_e['w_ih'], elite_fitness)
 
         # Self-diagnosis: adjust mutation rate
         if flag_diag:
@@ -436,7 +440,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
     ffs = []
     for ri in range(1):
         kk = random.split(random.fold_in(k0, ri), pop_size)
-        ff, _, _, _ = eval_batch(state['nodes'], state['conns'],
+        ff, _, _, _ = eval_batch_fn(state['nodes'], state['conns'],
             state['dopas'], state['regs'],
             state['spacials'], state['plans'],
             state['diags'], state['mirrors'], state['thoughts'], kk,
