@@ -203,3 +203,18 @@ def mutate_mirror(mr, key, noise=0.3):
 def crossover_mirror(m1, m2, key):
     pick = random.bernoulli(key, shape=(MIRROR_DIM,))
     return jnp.where(pick, m1, m2)
+
+# === Thought Token / Inner Speech — genome phụ cho social (5 floats) ===
+THOUGHT_DIM = 5
+
+def init_thought(key, pop_size):
+    return random.normal(key, (pop_size, THOUGHT_DIM)) * 0.5
+
+@jit
+def mutate_thought(th, key, noise=0.3):
+    return th + noise * random.normal(key, th.shape)
+
+@jit
+def crossover_thought(t1, t2, key):
+    pick = random.bernoulli(key, shape=(THOUGHT_DIM,))
+    return jnp.where(pick, t1, t2)

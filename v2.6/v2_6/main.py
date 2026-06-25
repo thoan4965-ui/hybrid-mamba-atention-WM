@@ -10,8 +10,9 @@ from v2_6.genome import (init_pop, mutate, crossover_innov, mutate_tags,
     init_plan, mutate_plan, crossover_plan,
     init_diag, mutate_diag, crossover_diag,
     init_mirror, mutate_mirror, crossover_mirror,
+    init_thought, mutate_thought, crossover_thought,
     MAX_GENES, NODE_PARAMS, CONN_PARAMS, TAG_DIM,
-    REG_DIM, SPATIAL_DIM, PLAN_DIM, DIAG_DIM, MIRROR_DIM)
+    REG_DIM, SPATIAL_DIM, PLAN_DIM, DIAG_DIM, MIRROR_DIM, THOUGHT_DIM)
 from v2_6.cppn import genome_to_policy, policy_forward, spatial_encoding
 from v2_6.env_ant import NoRewardAnt
 from v2_6.ae import init_ae, train_ae, encode, decode
@@ -32,26 +33,56 @@ def pred_loss(w_ih, w_pred, obs, target):
     return jnp.mean((target - pred) ** 2)
 
 @jit
-def eval_batch(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, keys,
-               flag_spatial=False, flag_planning=False, flag_diag=False, flag_mirror=False):
-    def single(n, c, d, r, sp, pl, dg, mi, k):
+def eval_batch(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, thoughts, keys,
+               flag_spatial=False, flag_planning=False, flag_diag=False, flag_mirror=False,
+               flag_thought=False, elite_data=None):
+    def single(n, c, d, r, sp, pl, dg, mi, th, k):
         pol = genome_to_policy(n, c, regs=r)
         pol['w_dopa'] = d
         d0 = d
 
-        # Planning params from genome
+        # Planning params
         B_beam = int(3 + 7 * jax.nn.sigmoid(pl[0])) if flag_planning else 1
         L_horizon = int(5 + 15 * jax.nn.sigmoid(pl[1])) if flag_planning else 1
         plan_noise = 0.1 + 0.4 * jax.nn.sigmoid(pl[2]) if flag_planning else 0.
 
-        # Mirror: just a regularization for now (elite alignment needs inter-gen data passing)
+        # Mirror / elite imitation params
         mirror_lr = 0.001 + 0.009 * jax.nn.sigmoid(mi[3]) if flag_mirror else 0.
+        mirror_select = 1.0 + jax.nn.sigmoid(mi[2]) if flag_mirror else 99.
+
+        # Inner speech params from thought genome
+        tok_dim = int(4 + 12 * jax.nn.sigmoid(th[0])) if flag_thought else 0
+        tok_broadcast = jax.nn.sigmoid(th[1]) if flag_thought else 0.
+        tok_listen = jax.nn.sigmoid(th[2]) if flag_thought else 0.
+        tok_temp = 0.5 + 1.5 * jax.nn.sigmoid(th[3]) if flag_thought else 1.
+        tok_decay = 0.1 + 0.9 * jax.nn.sigmoid(th[4]) if flag_thought else 0.
+
+        # Elite data
+        use_elite = (elite_data is not None and flag_mirror)
+        e_obs = elite_data['obs'] if use_elite else jnp.zeros(1)
+        e_act = elite_data['act'] if use_elite else jnp.zeros(1)
+        e_h = elite_data['hidden'] if use_elite else jnp.zeros(1)
+        e_fit = elite_data['fitness'] if use_elite else 0.
+
+        # Thought token state (persistent across steps within scan)
+        thought_state = jnp.zeros(tok_dim) if flag_thought else jnp.zeros(1)
 
         def step(ps, _):
+            nonlocal thought_state
             pol, s = ps
             obs_i = s.obs
 
-            # Spatial memory: concat grid/place encoding
+            # Inner speech: compute thought token, concat to obs
+            if flag_thought and tok_dim > 0:
+                h = jnp.tanh(obs_i @ pol['w_ih'][:-1] + pol['w_ih'][-1])
+                # update thought with decay
+                k_t = random.fold_in(k, int(s.info['step']))
+                w_tok = random.normal(k_t, (10, tok_dim)) * tok_temp
+                new_thought = jnp.tanh(h @ w_tok)
+                thought_state = thought_state * tok_decay + new_thought * (1 - tok_decay)
+                obs_i = jnp.concatenate([obs_i, thought_state])
+
+            # Spatial encoding
             if flag_spatial:
                 x = s.pipeline_state.x.pos[0, 0]
                 y = s.pipeline_state.x.pos[0, 1]
@@ -79,7 +110,7 @@ def eval_batch(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, keys,
 
             pol['w_dopa'] = jnp.array([w_grad, w_hebb, w_ga, 0., 0.])
 
-            # Planning: if enabled, rollout B sequences and pick best
+            # Planning: B×L rollout
             if flag_planning and B_beam > 1:
                 k_plan = random.fold_in(k, int(s2.info['step']))
                 act_noise = random.normal(k_plan, (B_beam, L_horizon, 8)) * plan_noise
@@ -98,11 +129,17 @@ def eval_batch(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, keys,
                 errs = vmap(rollout_one)(act_noise)
                 a = act_noise[jnp.argmin(errs), 0]
 
-            # Mirror: self-consistency regularization (simplified — no elite buffer in lax.scan)
-            if flag_mirror and mirror_lr > 0:
-                h = jnp.tanh(obs_i @ pol['w_ih'][:-1] + pol['w_ih'][-1])
-                reg_loss = mirror_lr * jnp.mean(h**2)  # keep hidden activations small
-                pol['w_ih'] = pol['w_ih'] - jnp.clip(reg_loss * (obs_i[:, None] * (1 - jnp.tanh(h)**2) @ pol['w_ho'].T), -0.01, 0.01)
+            # Elite-based imitation: hidden state alignment
+            if use_elite and e_fit > mirror_select:
+                h_a = jnp.tanh(obs_i @ pol['w_ih'][:-1] + pol['w_ih'][-1])
+                if e_h.shape[0] > 1:
+                    # find nearest elite obs in memory
+                    d_to_elite = jnp.min(jnp.sqrt(jnp.sum((obs_i - e_obs)**2, axis=1)))
+                    if d_to_elite < 20.:  # threshold for "similar state"
+                        align_loss = mirror_lr * jnp.mean((h_a - e_h) ** 2)
+                        g_ih_align = jax.grad(
+                            lambda w: jnp.mean((jnp.tanh(obs_i @ w[:-1] + w[-1]) - e_h)**2))(pol['w_ih'])
+                        pol['w_ih'] = pol['w_ih'] - align_loss * jnp.clip(g_ih_align, -0.05, 0.05)
 
             return (pol, s2), (s2.done, jnp.concatenate([obs_i, a, s2.info['energy'][None]]))
         (pol, s_final), (d, ex) = lax.scan(step, (pol, env.reset(k)), jnp.arange(500))
@@ -112,9 +149,11 @@ def eval_batch(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, keys,
         alive = jnp.where(jnp.any(d > 0.5), fd + 1., 500.)
         final_energy = jnp.nan_to_num(s_final.info['energy'], nan=0.)
         dopa = jnp.nan_to_num(pol['w_dopa'], 0.)
-        return (alive, dopa), jnp.concatenate([alive[None], final_energy[None], jnp.mean(ex, 0)])
-    (alive_arr, dopa_arr), r = vmap(single)(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, keys)
-    return alive_arr, dopa_arr, r
+        # Save final thought state
+        final_thought = thought_state if flag_thought else jnp.zeros(1)
+        return (alive, dopa, final_thought), jnp.concatenate([alive[None], final_energy[None], jnp.mean(ex, 0)])
+    (alive_arr, dopa_arr, thought_arr), r = vmap(single)(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, thoughts, keys)
+    return alive_arr, dopa_arr, thought_arr, r
 
 def save_checkpoint(state, ae, gen, curve, path, hf_api=None, hf_repo=None):
     np.savez(path,
@@ -125,6 +164,7 @@ def save_checkpoint(state, ae, gen, curve, path, hf_api=None, hf_repo=None):
         plans=np.array(state.get('plans', jnp.zeros(1))),
         diags=np.array(state.get('diags', jnp.zeros(1))),
         mirrors=np.array(state.get('mirrors', jnp.zeros(1))),
+        thoughts=np.array(state.get('thoughts', jnp.zeros(1))),
         ae_We=np.array(ae['We']), ae_be=np.array(ae['be']),
         ae_Wd=np.array(ae['Wd']), ae_bd=np.array(ae['bd']),
         gen=gen, curve=np.array(curve))
@@ -146,6 +186,7 @@ def load_checkpoint(path):
     if 'plans' in d: state['plans'] = jnp.array(d['plans'])
     if 'diags' in d: state['diags'] = jnp.array(d['diags'])
     if 'mirrors' in d: state['mirrors'] = jnp.array(d['mirrors'])
+    if 'thoughts' in d: state['thoughts'] = jnp.array(d['thoughts'])
     ae = {'We': jnp.array(d['ae_We']), 'be': jnp.array(d['ae_be']),
           'Wd': jnp.array(d['ae_Wd']), 'bd': jnp.array(d['ae_bd'])}
     return state, ae, int(d['gen']), list(d['curve'])
@@ -160,7 +201,7 @@ def download_latest_hf(api, repo_id, dest="."):
         return None
 
 def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
-        flag_spatial=False, flag_planning=False, flag_diag=False, flag_mirror=False):
+        flag_spatial=False, flag_planning=False, flag_diag=False, flag_mirror=False, flag_thought=False):
     key = random.PRNGKey(seed)
     hf_api = None
     try:
@@ -169,11 +210,16 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
             hf_api = HfApi(token=hf_token); print(f"HF OK: {hf_api.whoami()['name']}", flush=True)
     except: pass
 
-    # Init key for each flag-based genome
+    # Elite data for cross-generation imitation
+    elite_data = None
+    elite_fitness = 0.
+
+    # Init keys
     spatial_key = random.PRNGKey(seed + 10)
     plan_key = random.PRNGKey(seed + 11)
     diag_key = random.PRNGKey(seed + 12)
     mirror_key = random.PRNGKey(seed + 13)
+    thought_key = random.PRNGKey(seed + 14)
 
     if resume_path:
         state, ae, gen_start, curve = load_checkpoint(resume_path)
@@ -186,6 +232,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
         if 'plans' not in state: state['plans'] = init_plan(plan_key, state['pop_size'])
         if 'diags' not in state: state['diags'] = init_diag(diag_key, state['pop_size'])
         if 'mirrors' not in state: state['mirrors'] = init_mirror(mirror_key, state['pop_size'])
+        if 'thoughts' not in state: state['thoughts'] = init_thought(thought_key, state['pop_size'])
         if state['nodes'].shape[-1] < NODE_PARAMS:
             pad = jnp.zeros((state['nodes'].shape[0], MAX_GENES, NODE_PARAMS - state['nodes'].shape[-1]))
             state['nodes'] = jnp.concatenate([state['nodes'], pad], axis=-1)
@@ -213,32 +260,35 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
         state['plans'] = init_plan(plan_key, pop_size)
         state['diags'] = init_diag(diag_key, pop_size)
         state['mirrors'] = init_mirror(mirror_key, pop_size)
+        state['thoughts'] = init_thought(thought_key, pop_size)
         ae = init_ae(ae_key)
         gen_start = 0; curve = []
 
     # Pre-check
     n4 = vmap(lambda i: random.PRNGKey(i))(jnp.arange(4))
-    f4, _, _ = eval_batch(state['nodes'][:4], state['conns'][:4],
+    f4, _, _, _ = eval_batch(state['nodes'][:4], state['conns'][:4],
         state['dopas'][:4], state['regs'][:4],
         state['spacials'][:4], state['plans'][:4],
-        state['diags'][:4], state['mirrors'][:4], n4,
-        flag_spatial, flag_planning, flag_diag, flag_mirror)
-    flags_str = f" spatial={flag_spatial} planning={flag_planning} diag={flag_diag} mirror={flag_mirror}"
+        state['diags'][:4], state['mirrors'][:4], state['thoughts'][:4], n4,
+        flag_spatial, flag_planning, flag_diag, flag_mirror, flag_thought)
+    flags_str = f" spatial={flag_spatial} planning={flag_planning} diag={flag_diag} mirror={flag_mirror} thought={flag_thought}"
     print(f"V2.9.x vip={vip_init is not None}: {n_gen}gen x {pop_size}pop{flags_str}, pre-check fitness={float(jnp.max(f4)):.0f}", flush=True)
 
     t0 = time.time()
     k0 = random.PRNGKey(gen_start * 3)
     for g in range(gen_start, n_gen):
         k0 = random.PRNGKey(g * 3)
-        fs, dopas, regss, rss = [], [], [], []
+        fs, dopas, regss, rss, thoughtss = [], [], [], [], []
         for ri in range(1):
             kk = random.split(random.fold_in(k0, ri), pop_size)
-            f_arr, d_arr, r = eval_batch(state['nodes'], state['conns'],
+            f_arr, d_arr, th_arr, r = eval_batch(state['nodes'], state['conns'],
                 state['dopas'], state['regs'],
                 state['spacials'], state['plans'],
-                state['diags'], state['mirrors'], kk,
-                flag_spatial, flag_planning, flag_diag, flag_mirror)
+                state['diags'], state['mirrors'], state['thoughts'], kk,
+                flag_spatial, flag_planning, flag_diag, flag_mirror, flag_thought,
+                elite_data=elite_data)
             fs.append(f_arr); dopas.append(d_arr); rss.append(r)
+            thoughtss.append(th_arr)
             regss.append(jnp.mean(state['regs'], axis=0))
         f = jnp.nan_to_num(f_arr, nan=0.)
         dopa_mean = jnp.nan_to_num(jnp.mean(jnp.stack(dopas), axis=(0,1)), nan=0.)
@@ -259,6 +309,18 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
         ae_loss = jnp.mean(per_loss)
         f_total = f + 5 * dopamine
         curve.append((float(jnp.max(f_total)), float(jnp.mean(f_total))))
+
+        # Elite-based imitation: update elite if best agent improved
+        best_idx = jnp.argmax(f_total)
+        if flag_mirror and f_total[best_idx] > elite_fitness:
+            elite_fitness = float(f_total[best_idx])
+            # Record elite trajectory data
+            bi = best_idx
+            pol_e = genome_to_policy(state['nodes'][bi], state['conns'][bi], regs=state['regs'][bi])
+            e_obs = jnp.zeros((1, 29))  # placeholder — real trajectory would be stored in env
+            e_hidden = pol_e['w_ih'][:, :10]  # simplified: use policy weights as "hidden knowledge"
+            elite_data = {'obs': e_obs, 'act': jnp.zeros((1, 8)),
+                          'hidden': e_hidden.ravel(), 'fitness': elite_fitness}
 
         # Self-diagnosis: adjust mutation rate
         if flag_diag:
@@ -346,6 +408,11 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
         mc = jnp.zeros((pop_size, MIRROR_DIM))
         mc = mc.at[0::2].set(cm_batch(state['mirrors'][p1_arr], state['mirrors'][p2_arr], ksp_arr))
         mc = mc.at[1::2].set(cm_batch(state['mirrors'][p2_arr], state['mirrors'][p1_arr], kpl_arr))
+        # Thought crossover
+        cth_batch = vmap(crossover_thought)
+        thc = jnp.zeros((pop_size, THOUGHT_DIM))
+        thc = thc.at[0::2].set(cth_batch(state['thoughts'][p1_arr], state['thoughts'][p2_arr], ksp_arr))
+        thc = thc.at[1::2].set(cth_batch(state['thoughts'][p2_arr], state['thoughts'][p1_arr], kpl_arr))
 
         # Lamarkian tag delta
         td_arr = vmap(lambda p1, p2: jnp.tile(nt[p1] - nt[p2], 7)[:MAX_GENES])(p1_arr, p2_arr)
@@ -363,6 +430,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
         pc = mutate_plan(pc, k2, noise=.03*mr)
         dgc = mutate_diag(dgc, k2, noise=.03*mr)
         mc = mutate_mirror(mc, k2, noise=.03*mr)
+        thc = mutate_thought(thc, k2, noise=.03*mr)
 
         # Elitism top 2
         top2 = jnp.argsort(f_total)[-2:]
@@ -371,12 +439,12 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
             tc = tc.at[j].set(state['tags'][top2[j]]); dc = dc.at[j].set(state['dopas'][top2[j]])
             rc = rc.at[j].set(state['regs'][top2[j]]); sc = sc.at[j].set(state['spacials'][top2[j]])
             pc = pc.at[j].set(state['plans'][top2[j]]); dgc = dgc.at[j].set(state['diags'][top2[j]])
-            mc = mc.at[j].set(state['mirrors'][top2[j]])
+            mc = mc.at[j].set(state['mirrors'][top2[j]]); thc = thc.at[j].set(state['thoughts'][top2[j]])
 
         state['nodes'] = cn; state['conns'] = cc; state['tags'] = tc
         state['dopas'] = dc; state['regs'] = rc
         state['spacials'] = sc; state['plans'] = pc
-        state['diags'] = dgc; state['mirrors'] = mc
+        state['diags'] = dgc; state['mirrors'] = mc; state['thoughts'] = thc
         state['innov'] = ni
 
         if (g + 1) % 20 == 0:
@@ -386,6 +454,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
                   f" rmx={float(jnp.max(f)):.0f} rmn={float(jnp.mean(f)):.0f}"
                   f" ae={ae_loss:.4f} dopa={dopa_mean[0]:.2f}/{dopa_mean[1]:.2f}/{dopa_mean[2]:.2f}"
                   f" mod={n_active} mr={mr:.2f}"
+                  f" elite={elite_fitness:.0f}"
                   f" [{dt:.0f}s ETA {eta:.0f}m]", flush=True)
 
         if (g + 1) % 500 == 0 or g == n_gen - 1:
@@ -396,11 +465,12 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
     ffs = []
     for ri in range(1):
         kk = random.split(random.fold_in(k0, ri), pop_size)
-        ff, _, _ = eval_batch(state['nodes'], state['conns'],
+        ff, _, _, _ = eval_batch(state['nodes'], state['conns'],
             state['dopas'], state['regs'],
             state['spacials'], state['plans'],
-            state['diags'], state['mirrors'], kk,
-            flag_spatial, flag_planning, flag_diag, flag_mirror)
+            state['diags'], state['mirrors'], state['thoughts'], kk,
+            flag_spatial, flag_planning, flag_diag, flag_mirror, flag_thought,
+            elite_data=elite_data)
         ffs.append(ff)
     ff = jnp.nan_to_num(ff, nan=0.)
     bi = int(jnp.argmax(ff))
@@ -432,6 +502,7 @@ if __name__ == "__main__":
     flag_planning = '--planning' in args
     flag_diag = '--diagnosis' in args
     flag_mirror = '--imitation' in args
+    flag_thought = '--thought' in args
 
     if mode == "teacher":
         print("Training teacher (gradient + curiosity)...")
@@ -443,13 +514,13 @@ if __name__ == "__main__":
         vip_path = sys.argv[5] if len(sys.argv) > 5 and not sys.argv[5].startswith('--') else "vip_genome.npz"
         run(n_gen=n_gen, pop_size=pop_size, seed=seed, vip_init=vip_path,
             flag_spatial=flag_spatial, flag_planning=flag_planning,
-            flag_diag=flag_diag, flag_mirror=flag_mirror)
+            flag_diag=flag_diag, flag_mirror=flag_mirror, flag_thought=flag_thought)
     elif mode == "resume":
         resume_path = sys.argv[5] if len(sys.argv) > 5 and not sys.argv[5].startswith('--') else None
         run(n_gen=n_gen, pop_size=pop_size, seed=seed, resume_path=resume_path,
             flag_spatial=flag_spatial, flag_planning=flag_planning,
-            flag_diag=flag_diag, flag_mirror=flag_mirror)
+            flag_diag=flag_diag, flag_mirror=flag_mirror, flag_thought=flag_thought)
     else:
         run(n_gen=n_gen, pop_size=pop_size, seed=seed,
             flag_spatial=flag_spatial, flag_planning=flag_planning,
-            flag_diag=flag_diag, flag_mirror=flag_mirror)
+            flag_diag=flag_diag, flag_mirror=flag_mirror, flag_thought=flag_thought)
