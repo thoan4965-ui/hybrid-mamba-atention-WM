@@ -196,6 +196,15 @@ def download_latest_hf(api, repo_id, dest="."):
     except:
         return None
 
+def download_vip_hf(api, repo_id, dest="."):
+    try:
+        files = api.list_repo_files(repo_id, token=api.token)
+        vips = [f for f in files if f == "checkpoints/v2.9/run0/vip_genome.npz"]
+        if not vips: return None
+        return api.hf_hub_download(repo_id=repo_id, filename=vips[-1], local_dir=dest, token=api.token)
+    except:
+        return None
+
 def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None, run_id=1,
         flag_spatial=False, flag_planning=False, flag_diag=False, flag_mirror=False, flag_thought=False):
     key = random.PRNGKey(seed)
@@ -254,23 +263,21 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None, r
     else:
         ae_key, ga_key = random.split(key)
         if vip_init:
-            # Try HF first, then local
-            if vip_init == "auto":
+            # Try local first, then HF
+            if not os.path.exists(vip_init):
                 if hf_api:
-                    vdl = download_latest_hf(hf_api, "hhian/checkpoints", run_id=0, dest=".")
-                    if vdl and vdl.endswith("vip_genome.npz"):
-                        vip_path = vdl
-                    else:
-                        vip_path = "vip_genome.npz"
-                else:
-                    vip_path = "vip_genome.npz"
-            else:
-                vip_path = vip_init
-            if not os.path.exists(vip_path):
-                print(f"  ERROR: VIP genome not found at {vip_path}. Run teacher mode first.", flush=True)
+                    vdl = download_vip_hf(hf_api, "hhian/checkpoints")
+                    if vdl:
+                        vip_init = vdl
+                        print(f"  Downloaded VIP genome from HF", flush=True)
+            if not os.path.exists(vip_init):
+                print(f"  ERROR: VIP genome not found. Run teacher mode first ('python ... teacher').", flush=True)
                 return
-            print(f"VIP init: loading genome from {vip_path}", flush=True)
-            vip_gen = load_vip_genome(vip_path)
+            print(f"VIP init: loading genome from {vip_init}", flush=True)
+            vip_gen = load_vip_genome(vip_init) if os.path.exists(vip_init) else None
+            if vip_gen is None:
+                print("  ERROR: Failed to load VIP genome.", flush=True)
+                return
             k_exp = random.PRNGKey(seed + 42)
             nodes = jnp.tile(vip_gen['nodes'], (pop_size, 1, 1))
             conns = jnp.tile(vip_gen['conns'], (pop_size, 1, 1))
