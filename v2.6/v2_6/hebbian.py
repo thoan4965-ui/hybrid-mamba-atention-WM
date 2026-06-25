@@ -10,4 +10,6 @@ def hebbian_update(params, obs, scale=1.0):
     post_o = jnp.tanh(post_h @ w_ho)
     dw_ho = scale * 0.0001 * jnp.outer(post_h, post_o - jnp.tanh(post_o))
     w_ho = jnp.clip(w_ho + jnp.clip(dw_ho, -0.001, 0.001), -2., 2.)
-    return {'w_ih': w_ih, 'w_ho': w_ho, 'w_pred': params['w_pred'], 'w_dopa': params['w_dopa']}
+    return {'w_ih': w_ih, 'w_ho': w_ho, 'w_pred': params['w_pred'],
+            'w_dopa': params['w_dopa'],
+            'w_spat': params['w_spat'], 'w_thought': params['w_thought']}
