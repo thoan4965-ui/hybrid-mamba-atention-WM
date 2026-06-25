@@ -138,7 +138,8 @@ def make_eval_batch(flag_spatial=False, flag_planning=False, flag_diag=False, fl
         return alive_arr, dopa_arr, thought_arr, r
     return eval_batch
 
-def save_checkpoint(state, ae, gen, curve, path, hf_api=None, hf_repo=None):
+def save_checkpoint(state, ae, gen, curve, path, run_id=None, hf_api=None, hf_repo=None):
+    subdir = f"run{run_id}" if run_id else "run1"
     np.savez(path,
         nodes=np.array(state['nodes']), conns=np.array(state['conns']),
         tags=np.array(state['tags']), dopas=np.array(state['dopas']),
@@ -153,10 +154,22 @@ def save_checkpoint(state, ae, gen, curve, path, hf_api=None, hf_repo=None):
         gen=gen, curve=np.array(curve))
     if hf_api and hf_repo:
         try:
-            hf_api.upload_file(path_or_fileobj=path, path_in_repo=f"checkpoints/v2.9/cp_{gen}.npz", repo_id=hf_repo)
-            print(f"  Checkpoint G{gen} uploaded to HF", flush=True)
-        except:
-            print(f"  Warning: HF upload failed for G{gen}, checkpoint saved locally", flush=True)
+            hf_path = f"checkpoints/v2.9/{subdir}/cp_{gen}.npz"
+            hf_api.upload_file(path_or_fileobj=path, path_in_repo=hf_path, repo_id=hf_repo)
+            print(f"  Checkpoint G{gen} uploaded to HF ({subdir})", flush=True)
+        except Exception as e:
+            print(f"  Warning: HF upload failed: {e}", flush=True)
+
+def download_latest_hf(api, repo_id, run_id=None, dest="."):
+    try:
+        subdir = f"run{run_id}" if run_id else "run1"
+        prefix = f"checkpoints/v2.9/{subdir}/cp_"
+        files = api.list_repo_files(repo_id, token=api.token)
+        cps = sorted([f for f in files if f.startswith(prefix) and f.endswith(".npz")])
+        if not cps: return None
+        return api.hf_hub_download(repo_id=repo_id, filename=cps[-1], local_dir=dest, token=api.token)
+    except:
+        return None
 
 def load_checkpoint(path):
     d = np.load(path, allow_pickle=True)
@@ -183,7 +196,7 @@ def download_latest_hf(api, repo_id, dest="."):
     except:
         return None
 
-def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
+def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None, run_id=1,
         flag_spatial=False, flag_planning=False, flag_diag=False, flag_mirror=False, flag_thought=False):
     key = random.PRNGKey(seed)
     hf_api = None
@@ -192,6 +205,8 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
         if hf_token:
             hf_api = HfApi(token=hf_token); print(f"HF OK: {hf_api.whoami()['name']}", flush=True)
     except: pass
+
+    run_subdir = f"run{run_id}"
 
     # Elite data for cross-generation imitation
     elite_data = None
@@ -207,8 +222,21 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
     # Create eval_batch with flags as closure (JIT-safe)
     eval_batch_fn = make_eval_batch(flag_spatial, flag_planning, flag_diag, flag_mirror, flag_thought)
 
+    loaded = False
     if resume_path:
-        state, ae, gen_start, curve = load_checkpoint(resume_path)
+        if os.path.exists(resume_path):
+            state, ae, gen_start, curve = load_checkpoint(resume_path)
+            loaded = True
+        elif hf_api:
+            dl = download_latest_hf(hf_api, "hhian/checkpoints", run_id=run_id)
+            if dl:
+                print(f"  Downloaded latest checkpoint from HF ({run_subdir})", flush=True)
+                state, ae, gen_start, curve = load_checkpoint(dl)
+                loaded = True
+            else:
+                print(f"  No checkpoint on HF for {run_subdir}. Starting fresh.", flush=True)
+
+    if loaded:
         pad_genome = lambda key, arr, dim: arr if (arr.shape[1] >= dim and arr.shape[0] > 1) else jnp.zeros((state['pop_size'], dim))
         if 'dopas' not in state or state['dopas'].shape[1] < 5:
             state['dopas'] = init_dopas(random.PRNGKey(seed), state['pop_size'])
@@ -226,8 +254,23 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
     else:
         ae_key, ga_key = random.split(key)
         if vip_init:
-            print(f"VIP init: loading genome from {vip_init}", flush=True)
-            vip_gen = load_vip_genome(vip_init)
+            # Try HF first, then local
+            if vip_init == "auto":
+                if hf_api:
+                    vdl = download_latest_hf(hf_api, "hhian/checkpoints", run_id=0, dest=".")
+                    if vdl and vdl.endswith("vip_genome.npz"):
+                        vip_path = vdl
+                    else:
+                        vip_path = "vip_genome.npz"
+                else:
+                    vip_path = "vip_genome.npz"
+            else:
+                vip_path = vip_init
+            if not os.path.exists(vip_path):
+                print(f"  ERROR: VIP genome not found at {vip_path}. Run teacher mode first.", flush=True)
+                return
+            print(f"VIP init: loading genome from {vip_path}", flush=True)
+            vip_gen = load_vip_genome(vip_path)
             k_exp = random.PRNGKey(seed + 42)
             nodes = jnp.tile(vip_gen['nodes'], (pop_size, 1, 1))
             conns = jnp.tile(vip_gen['conns'], (pop_size, 1, 1))
@@ -439,9 +482,9 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
                   f" [{dt:.0f}s ETA {eta:.0f}m]", flush=True)
 
         if (g + 1) % 500 == 0 or g == n_gen - 1:
-            os.makedirs("checkpoints/v2.9", exist_ok=True)
-            cp_path = f"checkpoints/v2.9/cp_{g+1}.npz"
-            save_checkpoint(state, ae, g+1, curve, cp_path, hf_api, "hhian/checkpoints")
+            os.makedirs(f"checkpoints/v2.9/{run_subdir}", exist_ok=True)
+            cp_path = f"checkpoints/v2.9/{run_subdir}/cp_{g+1}.npz"
+            save_checkpoint(state, ae, g+1, curve, cp_path, run_id=run_id, hf_api=hf_api, hf_repo="hhian/checkpoints")
 
     ffs = []
     for ri in range(1):
@@ -483,24 +526,43 @@ if __name__ == "__main__":
     flag_diag = '--diagnosis' in args
     flag_mirror = '--imitation' in args
     flag_thought = '--thought' in args
+    run_id = 1
+    for i, a in enumerate(args):
+        if a.startswith('--run_id='):
+            run_id = int(a.split('=')[1])
+        elif a == '--run_id' and i + 1 < len(args):
+            run_id = int(args[i + 1])
 
     if mode == "teacher":
         print("Training teacher (gradient + curiosity)...")
-        teacher = train_teacher(n_episodes=200, lr=0.001, seed=seed)
+        teacher = train_teacher(n_episodes=500, lr=0.001, seed=seed)
         print("Compressing teacher → genome...")
-        genome = compress_teacher(teacher, n_opt_steps=500, seed=seed + 100)
+        genome = compress_teacher(teacher, n_opt_steps=2000, seed=seed + 100)
         save_vip_genome(genome)
+        # Upload VIP genome to HF
+        hf_api = None
+        try:
+            hf_token = os.environ.get("HF_TOKEN")
+            if hf_token:
+                from huggingface_hub import HfApi
+                hf_api = HfApi(token=hf_token)
+                hf_api.upload_file(path_or_fileobj="vip_genome.npz",
+                                   path_in_repo="checkpoints/v2.9/run0/vip_genome.npz",
+                                   repo_id="hhian/checkpoints")
+                print("  VIP genome uploaded to HF", flush=True)
+        except Exception as e:
+            print(f"  Warning: HF upload failed: {e}", flush=True)
     elif mode.startswith("vip"):
         vip_path = sys.argv[5] if len(sys.argv) > 5 and not sys.argv[5].startswith('--') else "vip_genome.npz"
-        run(n_gen=n_gen, pop_size=pop_size, seed=seed, vip_init=vip_path,
+        run(n_gen=n_gen, pop_size=pop_size, seed=seed, vip_init=vip_path, run_id=run_id,
             flag_spatial=flag_spatial, flag_planning=flag_planning,
             flag_diag=flag_diag, flag_mirror=flag_mirror, flag_thought=flag_thought)
     elif mode == "resume":
-        resume_path = sys.argv[5] if len(sys.argv) > 5 and not sys.argv[5].startswith('--') else None
-        run(n_gen=n_gen, pop_size=pop_size, seed=seed, resume_path=resume_path,
+        resume_path = sys.argv[5] if len(sys.argv) > 5 and not sys.argv[5].startswith('--') else "checkpoints/v2.9/run1/cp_500.npz"
+        run(n_gen=n_gen, pop_size=pop_size, seed=seed, resume_path=resume_path, run_id=run_id,
             flag_spatial=flag_spatial, flag_planning=flag_planning,
             flag_diag=flag_diag, flag_mirror=flag_mirror, flag_thought=flag_thought)
     else:
-        run(n_gen=n_gen, pop_size=pop_size, seed=seed,
+        run(n_gen=n_gen, pop_size=pop_size, seed=seed, run_id=run_id,
             flag_spatial=flag_spatial, flag_planning=flag_planning,
             flag_diag=flag_diag, flag_mirror=flag_mirror, flag_thought=flag_thought)
