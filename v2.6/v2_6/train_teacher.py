@@ -2,7 +2,7 @@
 import jax, jax.numpy as jnp, time
 jax.config.update('jax_default_matmul_precision', 'high')
 from jax import random, jit, vmap, grad
-from v2_6.cppn import genome_to_policy, policy_forward, genome_to_policy
+from v2_6.cppn import policy_forward
 from v2_6.env_ant import NoRewardAnt
 
 # Same env as V2.9.1
@@ -56,9 +56,6 @@ def train_teacher(n_episodes=100, lr=0.001, seed=3072):
     """Train teacher policy with gradient + curiosity."""
     key = random.PRNGKey(seed)
     params = init_teacher(key)
-
-    loss_and_grad = jax.value_and_grad(lambda p: teacher_loss(
-        p, *rollout(random.fold_in(key, 0), p)))
 
     for ep in range(n_episodes):
         k_ep = random.fold_in(key, ep)

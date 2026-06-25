@@ -101,7 +101,7 @@ def make_eval_batch(flag_spatial=False, flag_planning=False, flag_diag=False, fl
 
                 # Planning: fixed B_MAX×L_MAX with masking
                 if flag_planning:
-                    k_plan = random.fold_in(k, int(s2.info['step']))
+                    k_plan = random.fold_in(k, s2.info['step'].astype(jnp.int32))
                     acts = random.normal(k_plan, (B_MAX, L_MAX, 8)) * plan_noise
                     def rollout_one(acts_seq):
                         ss = s2; err = 0.
@@ -248,8 +248,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
     f4, _, _, _ = eval_batch_fn(state['nodes'][:4], state['conns'][:4],
         state['dopas'][:4], state['regs'][:4],
         state['spacials'][:4], state['plans'][:4],
-        state['diags'][:4], state['mirrors'][:4], state['thoughts'][:4], n4,
-        flag_spatial, flag_planning, flag_diag, flag_mirror, flag_thought)
+        state['diags'][:4], state['mirrors'][:4], state['thoughts'][:4], n4)
     flags_str = f" spatial={flag_spatial} planning={flag_planning} diag={flag_diag} mirror={flag_mirror} thought={flag_thought}"
     print(f"V2.9.x vip={vip_init is not None}: {n_gen}gen x {pop_size}pop{flags_str}, pre-check fitness={float(jnp.max(f4)):.0f}", flush=True)
 
@@ -264,8 +263,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
                 state['dopas'], state['regs'],
                 state['spacials'], state['plans'],
                 state['diags'], state['mirrors'], state['thoughts'], kk,
-                flag_spatial, flag_planning, flag_diag, flag_mirror, flag_thought,
-                elite_data=elite_data)
+                elite_data=elite_data if elite_data is not None else (jnp.zeros(1), 0.))
             fs.append(f_arr); dopas.append(d_arr); rss.append(r)
             thoughtss.append(th_arr)
             regss.append(jnp.mean(state['regs'], axis=0))
@@ -444,8 +442,7 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
             state['dopas'], state['regs'],
             state['spacials'], state['plans'],
             state['diags'], state['mirrors'], state['thoughts'], kk,
-            flag_spatial, flag_planning, flag_diag, flag_mirror, flag_thought,
-            elite_data=elite_data)
+            elite_data=elite_data if elite_data is not None else (jnp.zeros(1), 0.))
         ffs.append(ff)
     ff = jnp.nan_to_num(ff, nan=0.)
     bi = int(jnp.argmax(ff))
