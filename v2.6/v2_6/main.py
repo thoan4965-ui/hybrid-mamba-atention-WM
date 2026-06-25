@@ -1,4 +1,5 @@
-"""V2.9.1 — GA + Gradient + Hebbian + Dopamine(5) + Modular + Non-coding + Dup."""
+"""V2.9.1 — GA + Gradient + Hebbian + Dopamine(5) + Modular + Non-coding + Dup.
+   V2.9.2 — VIP Init: teacher gradient → genome compression → init pop."""
 import jax, jax.numpy as jnp, time, numpy as np, os
 jax.config.update('jax_default_matmul_precision', 'high')
 from jax import random, jit, vmap, lax
@@ -9,6 +10,8 @@ from v2_6.cppn import genome_to_policy, policy_forward
 from v2_6.env_ant import NoRewardAnt
 from v2_6.ae import init_ae, train_ae, encode, decode
 from v2_6.hebbian import hebbian_update
+from v2_6.train_teacher import train_teacher
+from v2_6.vip_compress import compress_teacher, save_vip_genome, load_vip_genome
 from huggingface_hub import HfApi
 
 env = NoRewardAnt(backend='mjx', energy_init=20., energy_cost=0.4, torque_cost=0.05)
@@ -97,7 +100,7 @@ def download_latest_hf(api, repo_id, dest="."):
     except:
         return None
 
-def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
+def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None):
     key = random.PRNGKey(seed)
     hf_api = None
     try:
@@ -123,13 +126,35 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
         print(f"Resumed G{gen_start}, pop={state['pop_size']}", flush=True)
     else:
         ae_key, ga_key = random.split(key)
-        state = init_pop(ga_key, pop_size)
-        state['dopas'] = init_dopas(ga_key, pop_size)
-        ae = init_ae(ae_key)
-        gen_start = 0; curve = []
-        n4 = vmap(lambda i: random.PRNGKey(i))(jnp.arange(4))
-        f4, _, _ = eval_batch(state['nodes'][:4], state['conns'][:4], state['dopas'][:4], n4)
-        print(f"V2.9.1: {n_gen}gen x {pop_size}pop", flush=True)
+        if vip_init:
+            # V2.9.2 VIP Init: load compressed genome from teacher
+            print(f"VIP init: loading genome from {vip_init}", flush=True)
+            vip_gen = load_vip_genome(vip_init)
+            # Init population from VIP genome with small noise
+            k_exp = random.PRNGKey(seed + 42)
+            nodes = jnp.tile(vip_gen['nodes'], (pop_size, 1, 1))
+            conns = jnp.tile(vip_gen['conns'], (pop_size, 1, 1))
+            noise_n = random.normal(k_exp, nodes.shape) * 0.05
+            noise_c = random.normal(k_exp, conns.shape) * 0.05
+            nodes = nodes + jnp.where(jnp.isnan(nodes), 0., noise_n)
+            conns = conns + jnp.where(jnp.isnan(conns), 0., noise_c)
+            state = {'nodes': nodes, 'conns': conns, 'tags': jnp.zeros((pop_size, TAG_DIM)),
+                     'innov': 6, 'pop_size': pop_size}
+            state['dopas'] = init_dopas(ga_key, pop_size)
+            ae = init_ae(ae_key)
+            gen_start = 0; curve = []
+            n4 = vmap(lambda i: random.PRNGKey(i))(jnp.arange(4))
+            f4, _, _ = eval_batch(state['nodes'][:4], state['conns'][:4],
+                                  state['dopas'][:4], n4)
+            print(f"V2.9.2 VIP init: {n_gen}gen x {pop_size}pop, fitness pre-check: {float(jnp.max(f4)):.0f}", flush=True)
+        else:
+            state = init_pop(ga_key, pop_size)
+            state['dopas'] = init_dopas(ga_key, pop_size)
+            ae = init_ae(ae_key)
+            gen_start = 0; curve = []
+            n4 = vmap(lambda i: random.PRNGKey(i))(jnp.arange(4))
+            f4, _, _ = eval_batch(state['nodes'][:4], state['conns'][:4], state['dopas'][:4], n4)
+            print(f"V2.9.1: {n_gen}gen x {pop_size}pop", flush=True)
 
     t0 = time.time()
     k0 = random.PRNGKey(gen_start * 3)
@@ -235,3 +260,26 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None):
         best_total_fitness=float(curve[-1][0]))
     return {'curve': jnp.array(curve), 'best_nodes': state['nodes'][bi],
             'best_conns': state['conns'][bi], 'best_fitness': float(jnp.max(ff))}
+
+if __name__ == "__main__":
+    import sys
+    import jax
+    n_gen = int(sys.argv[1]) if len(sys.argv) > 1 else 5000
+    pop_size = int(sys.argv[2]) if len(sys.argv) > 2 else 1024
+    seed = int(sys.argv[3]) if len(sys.argv) > 3 else 3072
+    mode = sys.argv[4] if len(sys.argv) > 4 else "train"
+
+    if mode == "teacher":
+        print("Training teacher (gradient + curiosity)...")
+        teacher = train_teacher(n_episodes=200, lr=0.001, seed=seed)
+        print("Compressing teacher → genome...")
+        genome = compress_teacher(teacher, n_opt_steps=500, seed=seed + 100)
+        save_vip_genome(genome)
+    elif mode.startswith("vip"):
+        vip_path = sys.argv[5] if len(sys.argv) > 5 else "vip_genome.npz"
+        run(n_gen=n_gen, pop_size=pop_size, seed=seed, vip_init=vip_path)
+    elif mode == "resume":
+        resume_path = sys.argv[5] if len(sys.argv) > 5 else None
+        run(n_gen=n_gen, pop_size=pop_size, seed=seed, resume_path=resume_path)
+    else:
+        run(n_gen=n_gen, pop_size=pop_size, seed=seed)

@@ -2,12 +2,18 @@
 > **Dự án:** LeWM — World Model cho robot manipulation
 > **Mục tiêu:** World model cho robotic manipulation — so sánh CfC (ODE-RNN) vs AR (Transformer) vs Hybrid CfC+Attention
 > **Phiên bản thống nhất:**
-> - **V0** — robot thật (bionic hand 8-DOF, data tự xây)
-> - **V1** — Hybrid CfC+Attention, TwoRoom simulation (abandoned)
-> - **V2.1** — Mamba-2+Attention, TwoRoom (active)
-> - **V3 (Social)** — Overhead cam, 1 agent, 2 robot
-> - **V3.1** — Overhead + 2 ego, 2 agent, 2 robot
-> - **V3.2** — 2 ego, 2 agent, 2 robot
+> - **V0 [done]** — robot thật (bionic hand 8-DOF, data tự xây)
+> - **V1 [abandoned]** — Hybrid CfC+Attention, TwoRoom simulation
+> - **V2.1 [done]** — Hybrid Mamba-2+Attention, Push-T 94.7%, TwoRoom 85.3%
+> - **V2.5 [proposed]** — 4-DOF robot lightweight deploy
+> - **V2.6 [merged → V2.9]** — CPNN genome → neuroevolution (nền tảng)
+> - **V2.9.1 [active]** — 2-Genome Neuroevolution: GA+Gradient+Hebbian+Dopamine
+> - **V2.9.2 [next]** — VIP Init (genomic bottleneck)
+> - **V2.9.3 [plan]** — Spatial memory genome
+> - **V2.9.4 [plan]** — Planning genome
+> - **V2.9.5 [plan]** — Imitation genome (mirror)
+> - **V2.9.6 [plan]** — Self-diagnosis genome
+> - **V3 [future]** — Multi-agent social
 
 ---
 
@@ -80,11 +86,9 @@ Ngón giữa: Servo 7 (gập) + Servo 8+9 (khép đối kháng) → P7 + P8 + P9
 
 ---
 
-## ⚠️ BÀI HỌC KINH NGHIỆM (TỪ RESEARCH LOGBOOK)
+## ⚠️ BÀI HỌC KINH NGHIỆM THEO PHIÊN BẢN
 
-### CẦN NÉ (Rules từ tất cả bugs)
-
-#### Reproducibility template (copy-paste vào đầu mỗi notebook)
+### Reproducibility template (copy-paste vào đầu mỗi notebook)
 ```python
 import torch, numpy as np, random, os, subprocess, hashlib
 
@@ -116,7 +120,6 @@ def get_git_commit():
         return "nogit"
 
 def exp_config(cfg):
-    """Inject reproducibility info vào config dict"""
     cfg['git_commit'] = get_git_commit()
     cfg['deterministic'] = True
     cfg['seed'] = cfg.get('seed', 3072)
@@ -125,317 +128,96 @@ def exp_config(cfg):
     return cfg
 ```
 
-46. **🔥 SEED + DETERMINISM — reproducibility checklist cho mọi exp:**
-    - Set `torch.manual_seed`, `np.random.seed`, `random.seed` đầu script
-    - Set `torch.backends.cudnn.deterministic = True` + `benchmark = False`
-    - Set `torch.use_deterministic_algorithms(True)` khi eval cuối
-    - Log seed + git commit hash + config dump vào mỗi checkpoint
-    - Báo kết quả: mean ± std (tối thiểu 3 seeds)
-47. **🔥 ENVIRONMENT LOCK — ghi requirements trước khi kết thúc session:**
-    ```
-    pip freeze > requirements_$(date +%Y%m%d).txt
-    conda env export > environment.yml  # nếu dùng conda
-    uv lock  # nếu dùng uv
-    ```
-48. **🔥 GIT LINK — mỗi experiment = 1 tag hoặc 1 commit:**
-    `git tag exp/{env}/{model}/{date}` — vd: `exp/pusht/hybrid/20260613`
-    Log `git rev-parse HEAD` vào WandB config hoặc checkpoint header
-49. **🔥 DATA HASH — ghi SHA-256 của dataset vào log.**
-    Dùng dataset download 1 lần, hash rồi pin commit SHA trên HF:
-    ```python
-    data_hash = snapshot_download("...", revision="v1.0")  # pin version
-    wandb.config.update({"data_hash": computed_hash})
-    ```
-50. **🔥 BẤT CỨ KẾT QUẢ NÀO KO CÓ ERROR BARS = KO CÓ GIÁ TRỊ.**
-    1 seed có thể may. 3 seeds ± std mới gọi là kết quả.
-51. **🔥 CUDA DETERMINISM CHẬM NHƯNG AN TOÀN:**
-    - Training thường: bật `cudnn.deterministic` (chấp nhận ~20% chậm)
-    - Eval cuối: bật cả `use_deterministic_algorithms(True)` + 3 seeds
-    - Debug: bật full deterministic để bug tái hiện được
-52. **⚠️ WANDB EXPERIMENT TRACKING — log config + metric + git commit:**
-    ```python
-    wandb.init(config=cfg)
-    wandb.log({"train/loss": loss, "val/success": acc})
-    wandb.run.log_code(root=".")  # auto log git commit
-    ```
-53. **⚠️ PREFETCH_FACTOR VỚI NUM_WORKERS=0 KHÔNG ĐI CÙNG.**
-    Khi `num_workers=0` (tránh fork crash), phải bỏ `prefetch_factor` khỏi config — PyTorch raise ValueError.
-    Fix: xóa dòng `prefetch_factor:` khỏi `loader` section, hoặc set `num_workers ≥ 1`.
-54. **⚠️ REPRODUCIBILITY TRÊN KAGGLE/COLAB KHÁC MÁY LOCAL:**
-    - Ko dùng `!pip install torch` — dùng image có sẵn
-    - Check Python + CUDA version đầu mỗi notebook: `python --version; torch.version.cuda`
-54b. **⚠️ KO TIN KẾT QUẢ MỘT LẦN CHẠY — luôn multi-seed.**
-    LeWM paper báo 96.0% ± 2.83. Nếu code 1 lần được 97% → chưa chắc.
-55. **⚠️ REPRO THỦ TỤC:**
-    Pre-commit hook check reproducibility → post-training script ghi log → so diff config với commit trước
-56. **🔥 BACKWARD THROUGH GRAPH SECOND TIME — hidden state carry gradient chồng chéo.**
-    Lỗi: `RuntimeError: Trying to backward through the graph a second time` ở step 1.
-    Nguyên nhân: CfC hidden state `h` lưu trong `self._h_states` giữa các training batches → batch N
-    backward đi qua graph của batch N-1 (đã free) → crash.
-    Fix:
-    - `HybridCfCPredictor.forward()`: `self.training → h_states = None` (fresh mỗi batch)
-    - `eval` mode: `self._h_states` persist cho rollout temporal memory
-    - Lưu `_h_states` dùng `.detach()` để ko carry gradient
-    - Code: `module.py` dòng 400-412
-    - Ảnh hưởng: Chỉ HybridCfCPredictor (AR predictor ko có hidden state nên ko gặp)
-58. **🔥 PHÂN BIỆT RÕ "LeWM paper" vs "V0 fork" vs "V1 code":**
-    - **LeWM (paper)** = lucas-maes/le-wm (gốc, 17 commits, AR predictor, Push-T/TwoRoom/Cube/Reacher)
-    - **le-wm/ (V0 fork)** = code-new fork gốc + V0 bionic hand sửa (smaller dims, 8-DOF hand)
-    - **le-wm-v1/ (V1)** = clone sạch từ lucas-maes/le-wm + HybridCfCPredictor
-    - Khi viết logbook/giao tiếp: ghi rõ "LeWM paper", "LeWM V0 fork", "LeWM V1 code"
-    - Đặc biệt số liệu rollout drift, loss, params — LeWM paper có số riêng, V0 fork có số riêng (từ test V0 T1-T4), ko gộp chung
+### CẦN NÉ TOÀN CỤC (mọi version)
+- **🔥 3 pillars of truth:** Mọi kết luận phải đủ Theory + Paper/Data + Empirical. Thiếu 1 → ghi "chưa biết, cần X".
+- **🔥 Ko suy luận số từ figure/PNG:** Figure ko đọc được text. Chỉ dùng bảng số.
+- **🔥 So sánh phải fair:** cùng params, cùng T, cùng budget, cùng seed, cùng task. Thiếu 1 = chưa kết luận.
+- **🔥 Ko tự bịa threshold/cơ chế:** Nếu ko chắc → "chưa biết".
+- **Error bars bắt buộc:** 1 seed = may rủi. ≥3 seeds ± std mới gọi là kết quả.
+- **Seed + determinism:** `torch.manual_seed(3072)`, `np.random.seed(3072)`, `random.seed(3072)`, `cudnn.deterministic=True`.
+- **Environment lock:** `pip freeze > requirements_$(date +%Y%m%d).txt` cuối mỗi session.
+- **Git tag mỗi experiment:** `git tag exp/{env}/{model}/{date}`.
+- **Data hash:** SHA-256 dataset → ghi vào config.
+- **Ko cài torch/torchvision trên Colab/Kaggle** — đã có sẵn.
+- **Reset runtime trước mỗi phiên train mới:** `Runtime → Factory reset`.
 
-59. **🔥 V1: CHỈ TRAIN HYBRID. So sánh với published số từ LeWM paper + checkpoints.**
-    - Ko train AR baseline — dùng số paper: TwoRoom 87%, Push-T 96%, Cube 88%, Reacher 49%
-    - Ko bị ràng buộc config giống LeWM — Hybrid có thể tối ưu riêng (T, frameskip, v.v.)
-    - Mọi so sánh = Hybrid result (từ Vast) vs LeWM paper result (từ paper/bảng)
-    - Lý do: tiết kiệm GPU-hours, tập trung novelty Hybrid, published số đã peer-review đáng tin
-60. **🔥 QUY TRÌNH CHUẨN: Colab fix bug → Vast chạy clean**
-    - Lý do: Vast CLI bất tiện (ko exec được bash, ko SSH từ môi trường AI, copy file phức tạp)
-    - Colab: dev nhanh (MCP/notebook trực quan), T4 free, fix hết bug code/config
-    - Chỉ khác biệt giữa Colab và Vast: `precision=16-mixed` (T4) vs `bf16` (L40S)
-    - Chi phí tiết kiệm: ~$0.5/h cho mỗi lần destroy-recreate bug → tránh được nếu fix trên Colab
-    - Flow mới:
-      1. Colab: code → fix bug → chạy 1 epoch xác nhận loss giảm
-      2. Push code lên GitHub
-      3. Vast: clone code mới → chạy 10 epoch clean (ko bug)
-    - Kinh nghiệm Vast lần này: 5 destroy-recreate × ~$0.5 = ~$2.5 tiết kiệm được nếu dùng Colab trước
+### CẦN NÉ V0 (robot bionic hand — ko apply V1+)
+- **Camera cheap cần 30s stabilize** sau khi mở.
+- **Camera Windows:** `cv2.CAP_DSHOW` + warmup 5 frame.
+- **Serial servo:** `scservo_sdk` (`scscl`), ko raw serial.
+- **Grasp stop = position error** `|cmd-actual| < 100` trên S2,S4,S7.
+- **Ko dùng cost cho grasp detection** — unreliable.
+- **Module.py thay đổi = check state_dict keys encoder** trước khi load checkpoint cũ.
+- **CfC step output = next frame.** Target = `emb[:, fi:fi+1]`, ko phải `fi+1:fi+2`.
+- **CUDA device-side assert** → cần Runtime → Disconnect and delete runtime.
+- **CEM context history bug:** CfC cần 3-frame history + actions.
+- **CfC cost cao trong CEM:** do OOD action gap 26×, ko phải CfC yếu.
+- **SIGReg shape:** `sigreg(emb.transpose(0,1))` — (T,B,D).
 
-61. **🔥 ĐỦ 3 TRỤ CỘT CHO MỌI KẾT LUẬN — Theory + Paper + Empirical**
-    - 1 kết luận uy tín phải có đủ 3: Lý thuyết (tại sao), Paper/Data (bằng chứng), Test (số liệu thực tế)
-    - Thiếu 1 trong 3 → ghi rõ "chưa biết, cần X để kết luận"
-    - Ví dụ: "SIGReg ~1-3 là healthy" — chỉ có một mình suy luận (lý thuyết đúng) nhưng thiếu test trên TwoRoom → ghi rõ "chưa có empirical confirmation"
-    - Áp dụng cho: loss metrics, architecture decisions, so sánh model, bất cứ claim nào trong thesis
+### CẦN NÉ V2.1+ (V2.1 → V2.5)
+- **HF upload:** `checkpoints/{subdir}/{run_name}/ep_{epoch}/` — upload config.json kèm .pt.
+- **Dataset extract (2 format):** Push-T = `.h5.zst` → `zstd -d`. TwoRoom = `.tar.zst` → `tar --zstd -xf`.
+- **Check all deps trước train:** `stable-worldmodel[env] shapely hdf5plugin pymunk hydra-core stable-pretraining`.
+- **Eval model load:** custom model → `torch.load(path, weights_only=False)`. Patch eval.py = sed.
+- **CEM time:** phân biệt first ep compile vs post-compile avg.
+- **Config Hydra:** resolve `${vars}` → output JSON. `_target_` + `_partial_` keys cần `clean(d)`.
+- **Precision:** bf16 preferred. T4 dùng `16-mixed`, L40S dùng `bf16`.
+- **Report PDF:** Chrome Ctrl+P → bỏ header/footer → scale 100. Dùng `<ol>` manual cho references.
+- **Comparison:** cùng T4 fp32, cùng seed, cùng budget, cùng eval.py. Ghi rõ GPU type.
+- **LeWM reproduction gap 96%→86%** do T4 fp32 limitation + torch version mismatch. Ko phải bug.
 
-57. **🔥 KIỂM TRA PARAMS KHI THAY ĐỔI KIẾN TRÚC — ko chọn backbone_units mù quáng**
-    Lỗi: Hybrid predictor backbone_units=1024, cfc_hidden=512 → 27.5M vs AR 10M (2.75×)
-    Hậu quả: so sánh ko công bằng — ko biết do architecture hay do params
-    Fix:
-    - Tính params trước commit:
-      py -c "from module import HybridCfCPredictor; m=HybridCfCPredictor(num_frames=3, input_dim=192, hidden_dim=192, output_dim=192, depth=6, heads=8, dim_head=64, cfc_hidden=384, cfc_units=384, backbone_layers=2, backbone_units=768); print(f'{sum(p.numel() for p in m.parameters())/1e6:.1f}M')"
-    - Target: predictor params ≈ AR (10M) ± 20%
-    - Điều chỉnh backbone_units, cfc_hidden để match target
+### CẦN NÉ V2.9.x (neuroevolution — đang active)
 
---- **DƯỚI ĐÂY LÀ V0-ONLY RULES (robot bionic hand — ko apply cho V2.1 sim)** ---
+#### 0. 🔥🔥🔥 ZERO-TOLERANCE: Quality over Quickfix
+- Xác định root cause → fix root cause duy nhất → ko workaround, ko che đậy
+- Ko revert feature vì khó debug
+- Chạy 50 gen confirm fix ko gây bug mới
+- DỪNG nếu crash/sai/thay đổi cấu trúc → báo user → bàn hướng
 
-13. **Module.py architecture mismatch = chết tất cả eval.** Khi upload module.py mới, check kỹ state_dict keys của encoder (TinyViT) xem có thay đổi kiến trúc ko (Attention norm, FFN norm). 1 thay đổi nhỏ trong encoder làm hỏng load tất cả checkpoints cũ.
-14. **Revert module.py phải chính xác, ko dùng string replace mù quáng.** `self.norm = nn.LayerNorm(dim)` xuất hiện ở cả Embedder lẫn Attention. Replace by string có thể xóa nhầm Attention's norm — t làm hỏng V6b/V6c vì lỗi này.
-15. **CUDA device-side assert survive kernel restarts.** `gc.collect()` + `torch.cuda.empty_cache()` + `kernel.do_shutdown(restart=True)` không clear được. Phải **Runtime → Disconnect and delete runtime** từ Colab UI.
-16. **Bounds check luôn nhân SKIP khi dùng frameskip.** Span thực tế cho N frames với frameskip K = N × K raw frames. Quên nhân SKIP → index out-of-bounds → CUDA assert khó debug.
-17. **CfC step output = next frame.** `step(emb[t], act[t], h)` → predicts `emb[t+1]`. Target là `emb[:, fi:fi+1]`, **KHÔNG phải `fi+1:fi+2`**.
-18. **AR overfits teacher forcing ở batch nhỏ.** AR-32: pred 0.0035 → rollout 0.25 (71x gap). AR-264 rollout 0.0012. AR cần batch >128.
-19. **Module.py base64 upload an toàn hơn copy inline.** Tránh escaping issue khi code chứa triple-quoted strings, backslashes, docstrings.
-20. **PowerShell dùng `$var = "value"` và `& $var`, KHÔNG dùng `VAR=value` Linux-style.** Biến env trong terminal Windows là `$env:VAR`, script variable là `$var`.
-21. **Camera chuẩn cho bionic hand = ID 1, phải dùng `cv2.CAP_DSHOW` trên Windows.** Warmup 5 frame rồi mới capture. Không có DSHOW → frame đen. Crop: `[8:8+364, 264:264+364]` từ `camera_config.json`.
-22. **Serial servo dùng `scservo_sdk` Python wrapper (`scscl`), không dùng C++ STServo_SDK hay raw serial.** Protocol: torque enable → `WritePos(sid, pos, 0, 0)`. Memory address 69-70 = PRESENT_CURRENT. Dùng `read2ByteTxRx(sid, 69)` để đọc dòng → detect grasp khi current spike.
-23. **Không tự bịa số liệu/threshold.** Nếu cần con số (threshold, ngưỡng, cost "tốt") mà chưa có thực nghiệm → nói "chưa biết" hoặc "cần test". Số bịa gây nhiễu phân tích, dẫn đến kết luận sai. Luôn kiểm tra số liệu gốc trước khi đưa ra nhận định.
-24. **Grasp stop = position error, không dùng cost.** Cost latent ko ổn định (phụ thuộc encoder, lighting, camera drift). Position error `|cmd-actual| < 100` trên 3 ngón (S2,S4,S7) là hardware signal đáng tin cậy hơn. Dynamic stop 5% initial cost là unreliable — bỏ.
-25. **Kiểm tra drive mount trước khi chạy bất kỳ cell nào trên Colab.** Chạy cell khi chưa mount → tưởng file mất → mất thời gian debug. Luôn mount trước.
-26. **Ko cài torch/torchvision trên Colab** — đã có sẵn. `pip install` torch sẽ làm corrupt import. Nếu cần thư viện, dùng `--no-deps` hoặc kiểm tra torch version trước.
-27. **Đường dẫn folder trên Drive phải chính xác.** `data_` khác `data`. Kiểm tra `os.listdir()` trước khi đọc file. Ko đoán tên folder.
-28. **🔥 CEM CONTEXT HISTORY BUG.** robot_planner.py gọi CEM ko truyền context_emb = CfC không có history 3-frame → CfC predict yếu. Fix: lưu 3 frame gần nhất + actions → truyền vào CEM. Step 0 luôn bị ảnh hưởng vì chưa có history — cần chấp nhận hoặc pre-populate.
-29. **CfC cost cao trong CEM → do random actions, ko phải CfC yếu.** CfC training: H5 actions smooth (delta ~10-50). CEM samples random actions (delta ~300-700). CfC chưa thấy jump lớn → predict kém. Phù hợp với T3 test (OOD action gap 26x).
-30. **[CẦN XÁC NHẬN LẠI] Encoder phân biệt có chai vs ko chai.** V4 data luôn có chai → cost grasp ko chai ≈ 1.076 (tăng so với có chai 0.0086). Chưa rõ là encoder thật sự detect "thiếu vật thể" hay do hand pose khác (grasp ko chai ≠ grasp có chai). Cần test: capture goal KO chai → CEM tay grasp KO chai → cost có thấp ko?
-31. **⚠️ BÃI BỎ MỌI KẾT QUẢ TEST CŨ (T1-T4, encoder robustness, color test).** Tất cả test trước đây đều được thực hiện KHÔNG có 20s camera stabilization. Camera chưa ổn định → pixel khác → latent khác → kết luận sai. Cụ thể:
-    - **Vẹt màu (MSE 2.6):** Có thể do camera chưa ổn định, ko phải encoder vẹt. Cần test lại với 20s stabilize.
-    - **Vẹt nền (MSE 0.5):** Có thể do exposure thay đổi khi xoay box, ko phải background.
-    - **Lighting (MSE 0.02-0.23):** Tương tự — exposure chưa ổn.
-    - **T1-T4 (CfC vs AR):** Các test này dùng H5 data (ko camera) → vẫn đáng tin. **Chỉ bãi bỏ camera test.**
-    - **Color parrot test V4 (MSE 2.6 chai vàng vs đỏ):** Đã đặt chai khác nhau, tay có thể xê dịch + camera chưa ổn → kết luận "vẹt màu" chưa chắc chắn.
-32. **Data structure V4:** 25 ep ko chai (neutral→grasp) + 25 ep có chai (12 đỏ, 13 vàng) + còn lại là phối hợp 3 ngón + độc lập từng ngón phân phối cos/sin. Mục đích: dạy model phối hợp 3 ngón grasp.
-33. **Hướng đi mới: Bãi bỏ mọi kết quả camera cũ. Tập trung V1 (Hybrid CfC+Attention).** V0 pipeline (grasp OK) giữ nguyên, nhưng encoder benchmark + color test cần làm lại sau V1 với 20s stabilize.
-34. **❌ CEM interpolation fix thất bại.** Thử: action interpolation (sub_steps=3) trong rollout + execution. Kết quả: cost tệ hơn (2.7), tốc độ chậm hơn 2x. Nguyên nhân: CfC ko thể predict chính xác ngay cả với delta 85 (training mean 5.2, max 42). Cần quá nhiều step để converge → không thực tế. Kết luận: CfC 8-dim single-frame action inherently không tương thích với CEM exploration structure. Hybrid CfC+Attention là hướng đúng — Attention lọc action noise (AR's stacked dim advantage) + CfC temporal (ODE advantage). Fix cả yếu điểm của AR (rollout drift) và CfC (OOD action).
-28. **Ko overwrite file của user** — `camera_goal.py` capture từ camera ghi đè ảnh của user. Dùng tên file mới hoặc kiểm tra tồn tại.
-29. **SIGReg shape bắt buộc (T,B,D).** `sigreg(emb.transpose(0,1))` chứ ko phải `sigreg(emb.reshape(-1,D))`. Shape sai → regularization sai hướng.
-30. **Augment per-sequence, ko per-frame.** 6 frame liên tiếp phải cùng hue shift, cùng brightness. Nếu mỗi frame augment riêng → CfC thấy màu thay đổi → học dynamics sai.
-31. **Ko dùng background replace nếu camera cố định.** Background trong box ko đổi → replace tạo nhiễu, ko giúp encoder robustness. Chỉ dùng ColorJitter (hue, brightness, saturation).
-32. **Ko tự viết forward function — dùng `lejepa_forward` từ train.py.** Forward tự viết dễ sai SIGReg shape, SS logic, data format.
-33. **Ko cài torchvision trên Colab (đã có sẵn).** `pip install torchvision` gây circular import → mất thời gian reset runtime.
-34. **Kiểm tra checkpoint format trước khi load.** V4 checkpoint format: `state_dict["model.encoder.xxx"]` (flat). Format custom: `state_dict["encoder"]["xxx"]` (nest). Đồng bộ format để tránh lỗi load.
-35. **Kiểm tra file output sau khi tạo (os.listdir / os.path.getsize).** H5 augmented tạo xong phải kiểm tra size, ko cho chạy train ngay nếu file 0MB.
-36. **Preload data vào GPU nếu VRAM đủ.** T4 15GB, data ~2GB → load hết vào GPU (`.cuda()`) trong `__init__`. Copy batch qua PCIe mỗi step chậm hơn slice tensor trong VRAM.
-37. **Kiểm tra PyPI version vs docs.** stable-worldmodel 0.1.1 documentation ghi hỗ trợ `format=hdf5` nhưng code chưa có — chỉ có ở development branch. Không tin docs mù quáng, kiểm tra format.py:60.
-38. **Dùng GPUDataset thay vì swm.data.load_dataset cho H5 data.** `swm.data.load_dataset` chỉ hỗ trợ `['lance', 'folder', 'lerobot', 'video']` — không HDF5. Load H5 bằng h5py trực tiếp.
-39. **Ko patch train.py gốc — override trong cell Colab.** Mọi thay đổi (action_dim, LR, SIGReg shape) đều làm qua instantiation trực tiếp trong notebook cell. Patch file gốc tạo dependency xấu, khó revert.
-40. **Reset runtime (Runtime → Factory reset) trước mỗi phiên train mới.** Các pip install lỗi hoặc import hỏng có thể làm torch corrupt. Runtime mới = sạch sẽ, tránh debug mất thời gian.
-41. **Camera cheap cần 30s ổn định sau khi mở.** Auto-exposure/white balance trên webcam 480p cần 10-28s. Dùng 30s an toàn. Luật này áp dụng cho MỌI lần thu data (goal capture, test encoder, CEM loop, thu data train).
-42. **🔥 CEM CONTEXT HISTORY BUG.** robot_planner.py gọi CEM ko truyền context_emb = CfC không có history 3-frame → CfC predict yếu. Fix: lưu 3 frame gần nhất + actions → truyền vào CEM.
-43. **🔥 QUYẾT ĐỊNH CHỐT: SIM MUJOCO cho V1 — Hybrid CfC+Attention benchmark.**
-44. **⚠️ TUYỆT ĐỐI KO TỰ BỊA CƠ CHẾ / THRESHOLD / GIẢ THUYẾT.** Nhiều lần tôi tự suy diễn: "cost phải < 0.05", "encoder cost ≈ imagination cost = done", "dynamic stop = 5% initial", "CfC yếu vì domain gap". Tất cả đều ko có cơ sở từ paper hay test thật. Hậu quả: đi chệch hướng, mất thời gian, kết luận sai. Luật cứng:
-    - Nếu muốn nói "cost bao nhiêu là tốt" → phải có test thật chứng minh
-    - Nếu muốn nói "cơ chế A hoạt động thế nào" → phải trích từ paper hoặc code
-    - Nếu ko chắc → nói "chưa biết" — đừng đoán
-    - Paper LeWM ko có "done detection" — CEM chạy 30 iter cố định, env báo terminated. Tôi tự bịa ra dynamic stop, plateau stop, cost threshold.
-    - Paper CfC ko test OOD action — tôi tự kết luận "CfC yếu OOD". Thực tế từ T3 test mới xác nhận CfC gap 26x. Đó là test, ko phải suy luận.
-    - **V0:** 8-DOF hand real grasp confirmed. Đủ proof cho hardware pipeline.
-    - **V0 findings:** CfC yếu OOD action (T3: 26x gap) → ko compatible với CEM random actions. AR drift 48x CfC ở long rollout.
-    - **V1 focus:** Sim MuJoCo (UR5e arm + Allegro/LEAP hand). Task reach→grasp→lift→place (38+ step). Sim cho action delta mượt, CfC temporal thể hiện.
-    - **Biện minh:** LeWM/Dreamer/TD-MPC2/DINO-WM đều sim benchmark. Sim→real gap đã giải quyết ở V0 (camera + encoder transfer OK).
-    - **Chọn arm:** cần research DOF + resource support trước khi quyết định.
-    - **Benchmark:** CfC vs AR vs Hybrid trên sim. Augment: random lighting, texture, color, viewpoint trong sim (dễ hơn real).
+#### 1. 🔥 ZERO HUMAN INTERVENTION RULE (V2.9.x specific)
+- **Fitness function chỉ gồm:** `steps_alive + AE_loss_norm` (survival + world model compression)
+- **KO thêm:** curiosity bonus, reward shaping, exploration bonus, hand-coded behavior priors
+- **KO sửa:** torque_cost, energy_init, food placement để "giúp" agent vượt valley
+- **KO thêm module cứng** (hard-coded spatial memory, planning, etc.) — mọi feature mới đều qua **genome extension** (~10 dòng/genome)
+- **Dopamine:** ko thêm float, ko sửa base. Giữ `d0[:3] + adapt + lr_grad` (5 floats)
+- **Lý do:** V2.9.x là thử nghiệm behavioral emergence. Tay người can thiệp selection = phá hỏng thí nghiệm. Valley of death ko phải bug — là data point.
 
-45. **V1 CHỐT: Hybrid benchmark trên Push-T + TwoRoom. Bỏ 6-DOF arm sim.**
-    - **Lý do bỏ arm sim:** SO-ARM100 6-DOF tốn thời gian setup sim environment, merge URDF, collect data. Resource tập trung cho novel predictor (Hybrid), ko phải environment engineering. Để dành 6-DOF cho social phase (cần 2 arm phối hợp).
-    - **Benchmark tasks:**
-      - Push-T (chính): manipulation, short-horizon, LeWM 96%
-      - TwoRoom (phụ): navigation, long-horizon, LeWM 87% (AR yếu temporal)
-      - Cube + Reacher (optional): nếu còn thời gian
-    - **Model so sánh:** LeWM (AR) pretrained checkpoint vs Hybrid (của mình). Ko train CfC riêng — đã có T1-T4 ablation chứng minh temporal advantage.
-    - **Kỳ vọng:** Push-T ≥ 96% (beat hoặc ngang LeWM). TwoRoom > 90% (temporal memory giúp navigation, nơi AR yếu).
-    - **Hybrid novelty claim:** CfC temporal (fix long-horizon AR drift) + Attention action buffer (fix OOD action CfC yếu). Beat cả AR và CfC ở cả manipulation lẫn navigation.
-    - **Social (sau Hybrid):** 2 Push-T joint latent (4-DOF action), hoặc 2 SO-ARM100 nếu có budget.
-    - **6-DOF arm:** Để dành cho social social phase — ko làm V1.
+#### 2. 🔥 THEORY DISCIPLINE RULE (V2.9.x specific)
+- **Đọc lý thuyết để HIỂU cơ chế gốc, ko phải để JUSTIFY architecture hiện tại.**
+- Paper là input cho thiết kế, ko phải bằng chứng cho correctness.
+- Sau khi hiểu cơ chế gốc, hỏi: "cái gì useful cho V2.9.x? cái gì ko?"
+- **Nếu thấy paper "hỗ trợ" architecture hiện tại → dừng, hỏi lại: "tao đang understand hay justify?"**
+- Cơ chế sinh học có thể khác biệt với artificial system — ghi nhận khác biệt, ko ép cho khớp.
+- **Lý do:** Tránh confirmation bias — đọc paper chỉ để tìm evidence cho quyết định đã có. Mất khả năng phát hiện design sai.
 
-**NEXT: Chọn arm cho sim. Phân tích 3 lựa chọn từ robot_descriptions.py + mujoco_menagerie:**
+#### 2. Architecture rules
+- **2-genome architecture bất di bất dịch:** genome chính (policy) + 2nd genome (dopamine). Genome mới = mở rộng, ko phải thay thế.
+- **CPPN modular (8 modules):** all nodes visible, only connections masked per module. Connection module_id = source node module.
+- **Non-coding DNA:** column 5 (expr) — gene với expr<0.1 bị CPPN bỏ qua.
+- **NaN prevention 3 lớp:** MJX solver iterations=3 + matmul precision high + nan_to_num mọi weight mỗi step.
+- **Dopamine adaptive:** `adapt = tanh(sensitivity × pred_error)`, `softmax(base + [adapt,-adapt,0])`.
 
-| Arm | DOF | Format | Cost | Stars | Build hardware | Ghi chú |
-|---|---|---|---|---|---|---|
-| **SO-ARM100** | **6-DOF** | MJCF + URDF | $122 | 6.5k⭐ | ✅ Dễ (in 3D + 6 servo STS3215) | **Khuyên dùng** — rẻ, open source, sim có sẵn, LeRobot integration |
-| UR5e | 6-DOF | MJCF | $12k+ | Cao | ❌ Ko tự build được | Professional arm, chỉ sim |
-| Panda | 7-DOF | MJCF | $25k+ | Cao | ❌ Ko tự build được | Nhiều DOF hơn nhưng đắt |
-| xArm7 | 7-DOF | URDF | $8k+ | TB | ⚠️ Có thể mua | |
+#### 3. When stuck (valley of death)
+- **Ko sửa env hoặc fitness.** Valley of death là landscape property cần được nghiên cứu, ko phải bug.
+- **Fix duy nhất được phép: VIP init** (genomic bottleneck) — nạp teacher gradient → genome → agent sinh ra đã biết move. Ko thay đổi fitness, ko thay đổi env.
+- **Nếu VIP init ko vượt được valley:** đây là discovery — ghi logbook + memory, ko workaround.
 
-→ **Chọn SO-ARM100:** sim có MJCF sẵn, sau này build hardware thật $122. 6-DOF đủ cho reach→grasp→lift→place. Cộng đồng 6.5k⭐, LeRobot compatible, STS3215 servo giống SC09 bus.
+#### 4. Extension protocol (thêm genome mới)
+- Mỗi genome mới = init + crossover + mutate + checkpoint ≈ 10 dòng
+- Genome mới độc lập về init/mutation/crossover, chung fitness với genome chính
+- VIP init cho genome mới = teacher riêng → compress
 
-**V1 PLAN CHI TIẾT: `plan/V1_SIM_PLAN.md`**
-- Phase 1: MuJoCo + SO-ARM100 + data collection (3 ngày)
-- Phase 2: Train CfC vs AR vs Hybrid (4 ngày)
-- Phase 3: Benchmark T1-T5 (1 ngày)
-- Phase 4: Báo cáo ISEF (2 ngày)
-- Augment sim: random camera góc, lighting, background, object color → zero-shot sim2real
-42. **🔥 CEM CONTEXT HISTORY BUG (duplicate — merged vào CẦN NÉ HIỆN TẠI §39).** #28 cũ giữ nguyên làm reference.
+#### 5. Eval & reporting
+- Raw log: G{gen}: max={raw_steps_alive} mean={raw_mean} ae={ae_loss} dopa={w_grad}/{w_hebb}/{w_ga}
+- Checkpoint: mỗi 500 gen → HF `hhian/checkpoints/checkpoints/v2.9/cp_{gen}.npz`
+- Fitness tracking: curve.append((max(f_total), mean(f_total)))
+- Kết luận valley = chỉ khi 500+ gen ko có xu hướng tăng
 
---- **KẾT THÚC PHẦN V0 + LỊCH SỬ** — Dưới đây là CẦN NÉ HIỆN TẠI (ghi đè, single source of truth) ---
-
-### CẦN NÉ HIỆN TẠI (ghi đè — single source of truth cho active V2.1+)
-
-#### ⚠️ ZERO-TOLERANCE — Luật cứng tối thượng (override mọi luật khác)
-
-0. **🔥🔥🔥 STEP-BY-STEP BUILD PROTOCOL — TUYỆT ĐỐI KO PHÁ VỠ:**
-    - Mỗi step chỉ code 1 component → test → confirm OK mới qua step sau
-    - Step nào: (a) crash, (b) cho kết quả sai, hoặc (c) phải thay đổi cấu trúc code/thiết kế → **LẬP TỨC DỪNG**
-    - Ko "cố đấm ăn xôi", ko "để sau debug", ko "chắc cũng ổn"
-    - Dừng → báo user → bàn hướng xử lý → user quyết định tiếp hay đổi hướng
-    - **Lý do:** 51 bugs trong quá khứ đều từ "chạy tiếp rồi fix sau". Chất lượng > tốc độ.
-    - **🔥 CHỈ CHẠY 1 CELL COLAB 1 LẦN.** Chạy cell → đọc output xong → mới chạy cell tiếp theo. Ko chạy 2 cell cùng lúc. Cell đang chạy mà chạy cell khác → MCP timeout → mất output.
-
-#### A. REPRODUCIBILITY & EXPERIMENT TRACKING
-1. **Seed + determinism:** `torch.manual_seed(3072)`, `np.random.seed(3072)`, `random.seed(3072)`, `cudnn.deterministic=True`, `cudnn.benchmark=False`. Eval cuối bật cả `use_deterministic_algorithms(True)`. Kết quả báo mean ± std (≥3 seeds).
-2. **Environment lock:** `pip freeze > requirements_$(date +%Y%m%d).txt` cuối mỗi session. Dùng uv lock nếu có.
-3. **Git tag mỗi experiment:** `git tag exp/{env}/{model}/{date}`. Log `git rev-parse HEAD` vào checkpoint header.
-4. **Data hash:** `hashlib.sha256(dataset)` — ghi vào config. Pin dataset revision trên HF.
-5. **Error bars bắt buộc:** 1 seed = may rủi. ≥3 seeds ± std mới gọi là kết quả.
-6. **WandB (nếu dùng):** `wandb.init(config=cfg)` + log metric mỗi epoch + `run.log_code(root=".")`.
-7. **Resume:** `glob *.ckpt` — ko hardcode filename. Lightning đặt tên `.ckpt` khác `output_model_name`. Dùng `ModelCheckpoint` callback thay vì Lightning default.
-8. **HF upload:** `checkpoints/{subdir}/{run_name}/ep_{epoch}/` — ko hardcode, ko env var. Upload config.json kèm .pt.
-
-#### B. ENVIRONMENT & SETUP
-9. **Check CUDA+Torch trước cài wheel:** `python -c "import torch; print(torch.__version__, torch.version.cuda)"`. Wheel version phải match torch → undefined symbol.
-10. **Ko build source nếu có wheel:** causal-conv1d, mamba-ssm đều có wheel release. Check GitHub releases trước.
-11. **Ko cài torch/torchvision trên Colab/Kaggle** — đã có sẵn. Dùng uv `--system` để override version (vd: `uv pip install --system torch==2.9.0`). `pip install torch` corrupt import.
-12. **Colab mamba-ssm install:** downgrade torch 2.11→2.9 bằng uv. Download wheel từ GitHub releases. Match version `cu12torch2.9`. Ko dùng pip để override torch.
-13. **Check all deps task trước khi train:** `pip install stable-worldmodel[env] shapely hdf5plugin pymunk`. TwoRoom thiếu `hdf5plugin`, Push-T thiếu `shapely`/`pymunk`, eval thiếu `stable-pretraining`/`hydra-core` — lặp lại 3 lần.
-14. **🔥 Dataset extract (2 format):** Cần `apt-get install zstd -qq` trước.
-    - **Push-T (`.h5.zst`):** `snapshot_download(repo, repo_type="dataset", local_dir=tmp)` → `zstd -d tmp/file.h5.zst -o /content/datasets/target.h5` → `rm -rf tmp`. File nén đơn, ko tar.
-    - **TwoRoom (`.tar.zst`):** `snapshot_download(repo, repo_type="dataset", local_dir=tmp)` → `tar --zstd -xf tmp/file.tar.zst -C /content/datasets/` → `rm -rf tmp`.
-    - `swm.data.load_dataset` chỉ hỗ trợ lance/folder/lerobot/video — ko HDF5. Dùng h5py trực tiếp hoặc GPUDataset.
-15. **Dataset format:** phải trả sequences `(T, H, W, C)` NHWC, ko single frame. Pixel norm: `float32/255.0` — đồng bộ train/eval.
-16. **Check token/dịch vụ trước session:** `api.whoami()` — ko đợi runtime mới biết 401.
-17. **Reset runtime trước mỗi phiên train mới:** `Runtime → Factory reset`. Pip install lỗi có thể corrupt torch — runtime mới = sạch.
-18. **Kiểm tra thư mục trước sửa/push:** hiểu quan hệ config→file→import→module trước khi edit.
-19. **Ko tin docs mù quáng:** check source code (format.py:60) trước khi dùng function — `stable-worldmodel 0.1.1` docs ghi hỗ trợ `format=hdf5` nhưng code chưa có.
-20. **Reset Colab runtime sau CUDA assert:** `gc.collect()` + `torch.cuda.empty_cache()` + `kernel.do_shutdown(restart=True)` không clear được. Phải `Runtime → Disconnect and delete runtime`.
-
-#### C. TRAINING CONFIG & CODE
-21. **`++output_model_name` để phân biệt experiment.** Ko để chung `lewm` — VD: `tworoom`, `pusht`, `cube`. Ko cần sửa file config, chỉ thêm command line.
-22. **Tách train và eval:** eval riêng script sau train. Ko chạy eval tự động — nếu crash mất checkpoint cuối epoch.
-23. **Wrapper try/except cho mọi I/O:** HF upload, checkpoint save, file write — training ko dừng vì lỗi phụ.
-24. **Module.py thay đổi = check state_dict keys encoder trước:** 1 thay đổi nhỏ (Attention norm, FFN norm) hỏng load tất cả checkpoint cũ.
-25. **Revert module.py chính xác:** `self.norm = nn.LayerNorm(dim)` xuất hiện ở cả Embedder lẫn Attention — replace string có thể xóa nhầm.
-26. **Module.py upload:** base64 encode an toàn hơn copy inline (tránh escaping triple-quote/backslash).
-27. `prefetch_factor` + `num_workers=0` không đi cùng → PyTorch raise ValueError. Fix: num_workers ≥ 1 hoặc bỏ prefetch_factor.
-28. **Precision:** bf16 trên GPU hỗ trợ. Ko dùng fp16 khi có bf16. T4 dùng `16-mixed`, L40S dùng `bf16`.
-29. **Gradient checkpointing:** ko dùng với Lightning Trainer (ko phải param của nó).
-
-#### D. MODEL ARCHITECTURE
-30. **🔥 3 pillars of truth:** Mọi kết luận phải đủ Theory + Paper/Data + Empirical. Thiếu 1 → ghi "chưa biết, cần X".
-31. **🔥 Ko suy luận số từ figure/PNG:** Figure ko đọc được text. Chỉ dùng bảng số. Nếu ko có bảng → "ước lượng, ko chính xác".
-32. **🔥 So sánh phải fair:** cùng params, cùng T, cùng budget, cùng seed, cùng task. Thiếu 1 yếu tố = chưa kết luận được.
-33. **🔥 Ko tự bịa threshold/cơ chế:** "cost < 0.5 = tốt", "CfC yếu OOD" — phải có test thật. Nếu ko chắc → "chưa biết".
-34. **🔥 Phân biệt LeWM paper vs V0 fork vs V1 code:** Số liệu riêng từng bản — ko gộp chung.
-35. **Params check khi đổi kiến trúc:** tính params trước commit. Target: predictor ≈ AR (10M) ± 20%. Ko chọn backbone_units mù quáng.
-36. **CfC hidden state carry:** `self.training → h_states = None` (fresh mỗi batch). Eval: persist `.detach()`. Lỗi `backward through graph second time` do gradient carry qua batch cũ.
-37. **CfC predict target:** `step(emb[t], act[t], h)` → `emb[t+1]`. Target = `emb[:, fi:fi+1]`, ko phải `fi+1:fi+2`.
-38. **AR overfits teacher forcing ở batch nhỏ** (<128). AR-32: rollout gap 71×. AR cần batch ≥128.
-39. **CEM context history:** CfC cần 3-frame history + actions. Ko truyền → predict yếu.
-40. **CfC cost cao trong CEM:** do random actions (delta 300-700 vs training 10-50), ko phải CfC yếu — OOD action gap 26× confirmed.
-
-#### E. EVAL & REPORTING
-41. **🔥 Eval checklist đầy đủ (từng bước kiểm tra trước khi chạy):**
-    ```
-    □ apt-get install zstd -qq (bắt buộc, cho cả .h5.zst lẫn .tar.zst)
-    □ pip install stable-worldmodel[env] shapely hdf5plugin pymunk hydra-core stable-pretraining
-    □ CWD đúng (vd: le-wm-v2.1 — chứa module.py custom)
-    □ HF_TOKEN set (os.environ hoặc Colab secrets)
-    □ Dataset download: snapshot_download(repo, repo_type="dataset", local_dir=tmp)
-    □ Dataset extract đúng format: zstd -d (Push-T) hay tar --zstd -xf (TwoRoom)
-    □ Cleanup: rm -rf tmp (file nén) sau extract
-    □ STABLEWM_HOME=/content → dataset ở /content/datasets/
-    □ Model file .pt lưu vào /content/datasets/ (cùng persistent dataset)
-    □ model.float() — ép fp32 cho T4 (ko bf16 native)
-    □ torch.load(..., weights_only=False) — PyTorch 2.6+ mặc định True
-    □ sed -i "s|swm.wm.utils.load_pretrained(cfg.policy)|torch.load(cfg.policy, weights_only=False)|" eval.py — bypass load_pretrained
-    □ Deterministic: seed=3072, cudnn.deterministic=True
-    □ Eval: budget=50, goal=25, num_eval=50 (giống LeWM paper)
-    ```
-42. **Eval budget=50, goal_offset=25** cho mọi task (TwoRoom từng sai 150/100).
-43. **Ko so sánh CfC vs AR trên short fixed-step** — CfC lợi thế ở variable Δt và long rollout.
-44. **config.json = resolved YAML:** `num_frames` = `${history_size}` (history_size=3, ko phải T). `action_encoder.input_dim` = frameskip × action_dim. `_partial_: true` là Hydra syntax. Đọc YAML gốc resolve hết `${vars}` → output JSON.
-45. **Upload config.json kèm .pt:** `load_pretrained` bắt buộc config.json để `hydra.utils.instantiate()` reconstruct model.
-46. **🔥 Báo cáo: references rendering trong HTML → PDF.** Markdown list trong multi-column CSS bị gộp 1 dòng. Fix: dùng `<ol>` tag manual + `page-break-inside: avoid`. Verify Chrome trước Ctrl+P.
-47. **🔥 Báo cáo: PDF export workflow.** Chrome → Ctrl+P → bỏ header/footer → scale 100 → kiểm tra numbered lists, code blocks, images ko bị cắt. Ko dùng Edge/Firefox.
-48. **Báo cáo: số từ code mình ghi chính xác (86%, 43/50). Số từ paper chỉ từ bảng, ko từ figure. Đụng PNG → dừng + kêu user đọc.**
-49. **🔥 Dataset eval path:** `swm.data.HDF5Dataset` tìm `.h5` theo pattern `{cache_dir}/datasets/{name}.h5`. `STABLEWM_HOME=/content` + `cache_dir=null` → cache_dir = `/content`. Push-T: `/content/datasets/pusht_expert_train.h5`. TwoRoom: `/content/datasets/tworoom.h5`. Luôn extract `.tar.zst` vào `/content/datasets/` trước eval.
-50. **🔥 Eval checklist — dataset verify:** Kiểm tra `.h5` file tồn tại ở path eval mong đợi TRƯỚC khi chạy eval. Dùng `os.listdir` + `os.path.getsize` hoặc `h5py.File` thử.
-51. **🔥 Dataset extract format:** Push-T = `.h5.zst` → `zstd -d file.h5.zst -o dst.h5`. TwoRoom = `.tar.zst` → `tar --zstd -xf file.tar.zst -C dst/`. Ko lẫn lộn — mỗi task có format riêng.
-52. **🔥 Eval model load (custom model):** `load_pretrained` chỉ hỗ trợ LeWM official config + HF repo. Cho hybrid model (Mamba2Predictor, custom JEPA): save full object `.pt` + `torch.load(path, weights_only=False)`. Bypass `load_pretrained` bằng `!sed -i "s|swm.wm.utils.load_pretrained(cfg.policy)|torch.load(cfg.policy, weights_only=False)|" eval.py`.
-53. **🔥 torch.load weights_only=False:** PyTorch 2.6+ mặc định `weights_only=True` chặn load class custom. Luôn thêm `weights_only=False` vì file model tự tạo, trust source.
-54. **🔥 Patch eval.py = sed, ko monkey-patch:** Monkey-patch `load_pretrained` trong Python cell ko hiệu quả vì `!python eval.py` chạy subprocess mới → patch mất. Phải `!sed -i "s|swm.wm.utils.load_pretrained(cfg.policy)|torch.load(cfg.policy, weights_only=False)|" eval.py` trước khi gọi python.
-55. **🔥 Model file path:** Lưu model `.pt` vào `/content/datasets/` (cùng folder với dataset) — file ở `/content/` mất khi runtime Colab reset, nhưng `/content/datasets/` persistent trong session.
-56. **🔥 Rename rules (7 rules, verified strict=True PASS):** LeWM official checkpoint keys thay đổi giữa stable-pretraining versions.
-    - `encoder.encoder.layer` → `encoder.layers`
-    - `attention.attention.query` → `attention.q_proj`
-    - `attention.attention.key` → `attention.k_proj`
-    - `attention.attention.value` → `attention.v_proj`
-    - `attention.output.dense` → `attention.o_proj`
-    - `intermediate.dense` → `mlp.fc1`  (FFN expand)
-    - `output.dense` → `mlp.fc2`       (FFN compress)
-    - **KHÔNG dùng:** `layernorm` → `norm` (sai, model dùng `layernorm_before`/`layernorm_after`)
-57. **🔥 Build model từ config (Hydra _target_):** Config chứa `_target_` + `_partial_` keys → crash constructor nếu pass thẳng. Dùng:
-    ```python
-    def clean(d):
-        return {k:v for k,v in d.items() if not k.startswith("_") and not isinstance(v, dict)}
-    # norm_fn là dict exception, pass tay:
-    MLP(**clean(cfg["projector"]), norm_fn=torch.nn.BatchNorm1d)
-    ```
-58. **🔥 MLP positional args:** `MLP(input_dim=D, hidden_dim=2048, output_dim=D)` — đúng là `MLP(D, 2048, D)`. Sai lầm điển hình: viết `MLP(D, D, 2048)` (đảo hidden_dim và output_dim).
-59. **🔥 CEM time — phân biệt first compile vs post-compile:** Log có nhiều dòng `CEM solve time`, mỗi dòng = 1 episode, ko phải tổng. Dòng đầu = first episode (compile + PyTorch init overhead). Dòng 2+ = post-compile (steady-state). Hybrid Mamba-2: first ep ~1160s (Triton kernel compile), post-compile ~85s. LeWM AR: first ep ~98s (Attention kernel có sẵn), post-compile ~20s. **CEM time post-compile mới đại diện, first ep ko dùng để so sánh.**
-
-### CẦN NÉ V0 (historical — robot bionic hand, ko apply cho V2.1+)
-- **Camera cheap cần 30s stabilize** sau khi mở (auto-exposure/white balance).
-- **Camera Windows:** `cv2.CAP_DSHOW` + warmup 5 frame + crop từ `camera_config.json`.
-- **Serial servo:** `scservo_sdk` (`scscl`), ko raw serial. Torque enable → `WritePos(sid, pos, 0, 0)`.
-- **SC09:** Bus servo SCS CL protocol, range [0,1023]. Load addr 60-61. Current addr 69-70 = 0 (ko implement).
-- **Grasp stop = position error** `|cmd-actual| < 100` trên S2,S4,S7 (3 ngón). Ko dùng cost (unreliable).
-- **Grasp hardest for JEPA:** visual change ~mm → SIGReg treat as noise. Task có visual change lớn (Push-T, arm) dễ hơn.
-- **Position error** detection: `ReadPos(sid)` so với cmd → 3/3 ngón pass = grasp. 5 dòng code.
-- **Ko overwrite user file:** `camera_goal.py` dùng tên mới.
-- **SIGReg shape:** `sigreg(emb.transpose(0,1))` — (T,B,D), ko reshape.
-- **Augment per-sequence, ko per-frame:** 6 frame cùng hue/brightness. CfC thấy màu thay đổi → học dynamics sai.
-- **Checkpoint format V0:** `state_dict["model.encoder.xxx"]` (flat). Custom: `state_dict["encoder"]["xxx"]` (nest). Đồng bộ.
-- **Kiểm tra file output:** H5 augmented tạo xong check `os.path.getsize()` — 0MB → bug.
-- **Ko patch train.py gốc:** override trong Colab cell.
-- **Ko background replace (camera cố định):** tạo nhiễu, ko giúp encoder robustness. Chỉ ColorJitter.
+#### 6. NaN prevention (V2.9.x cụ thể)
+- `env.sys.mj_model.opt.iterations = 3` (solve iterations)
+- `jax.config.update('jax_default_matmul_precision', 'high')`
+- `jnp.nan_to_num(obs, 0.)`, `jnp.nan_to_num(done, nan=1.)`, `jnp.nan_to_num(weight, 0.)`
+- `for k in pol: pol[k] = jnp.nan_to_num(pol[k], 0.)` mỗi step
 
 ## Kết quả chính theo version
 
@@ -443,7 +225,8 @@ def exp_config(cfg):
 |---|---|---|---|---|
 | **V0** | AR vs CfC (so sánh trên robot thật cùng pipeline) | Robot bionic hand 8-DOF grasp | CfC drift 0.000014/step, AR drift 0.000481 → CfC **34×** tốt hơn long rollout | CfC temporal vượt trội (ODE stateful), AR stateless yếu rollout. **Scheduled Sampling (SS) linear 0→30%** cải thiện CfC rollout 0.072→0.0025 (29×). **Novelty:** chưa paper nào áp dụng SS cho ODE-RNN/CfC. |
 | **V1** | Hybrid CfC+Attention | TwoRoom | 78% (budget=50, T=16), **6%** (budget=150) | SIGReg noise × ODE → noise khuếch đại qua CfC hidden state → crash ở rollout dài. ODE stateful là dao hai lưỡi. |
-| **V2.1** | Hybrid Mamba-2+Attention | TwoRoom, Push-T | TwoRoom **86%** (tied LeWM 87%). Push-T **92%** (46/50) — **beat LeWM official 86% (43/50) trên cùng T4 fp32, cùng seed 3072** | Discrete state (Mamba-2) giữ temporal advantage ko khuếch đại noise. CfC 6% → Mamba-2 86% = **cải thiện 14×**. Push-T: Hybrid 92% vs LeWM official 86% trên T4 — **+6% gap**, novelty confirmed: Mamba-2 hybrid vượt AR trên cùng hardware, cùng eval protocol.
+| **V2.1** | Hybrid Mamba-2+Attention | TwoRoom, Push-T | TwoRoom **86%** (tied LeWM 87%). Push-T **92%** (46/50) — **beat LeWM official 86% (43/50) trên cùng T4 fp32, cùng seed 3072** | Discrete state (Mamba-2) giữ temporal advantage ko khuếch đại noise. CfC 6% → Mamba-2 86% = **cải thiện 14×**. Push-T: Hybrid 92% vs LeWM official 86% trên T4 — **+6% gap**, novelty confirmed: Mamba-2 hybrid vượt AR trên cùng hardware, cùng eval protocol. |
+| **V2.9.1** | 2-Genome GA+Gradient+Hebbian+Dopamine | Brax Ant (no reward) | Valley of death confirmed: max 37-47, mean 33, ae_loss→0.005, dopa→GA 0.64-0.77 | 2-genome architecture hoạt động đúng design. Dopamine tự phân hóa emergent. CPPN ko thể output zero action → fitness < lý thuyết 50. Valley ko phải bug — là landscape property. |
 
 ### Bài học tổng quát (06/2026)
 
@@ -465,9 +248,14 @@ def exp_config(cfg):
 ### Tiến độ hiện tại
 - **V0 [done]:** Robot bionic hand 8-DOF, grasp 100%, planning ~2s
 - **V1 [abandoned]:** Hybrid CfC+Attention TwoRoom 78% (T=16 budget=50)
-- **V2.1 [done]:** Push-T: Hybrid **94.7%±3.1%** beat LeWM 86.0%±4.0% (+8.7%). TwoRoom: Hybrid 85.3%±10.1% tied LeWM 80.7%±10.3%. **CEM Push-T:** Hybrid~85s vs LeWM~20s (chậm 4× trade-off).
-- **V2.1 [done]:** TwoRoom Mamba-2+Attention **86%** (Option C, T=4, budget=50)
-- **V3 [plan]:** Social overhead cam — sau V2.1
+- **V2.1 [done]:** Push-T: Hybrid **94.7%±3.1%** beat LeWM 86.0%±4.0% (+8.7%). TwoRoom: Hybrid 85.3%±10.1% tied LeWM 80.7%±10.3%.
+- **V2.9.1 [active]:** 2-Genome Neuroevolution, 5000 gen × 1024 pop, valley of death confirmed (max 37-47)
+- **V2.9.2 [next]:** VIP Init — teacher gradient → genome, phá valley
+- **V2.9.3 [plan]:** Spatial memory genome (grid/place cells encoding)
+- **V2.9.4 [plan]:** Planning genome (beam search params)
+- **V2.9.5 [plan]:** Imitation genome (mirror + demo buffer)
+- **V2.9.6 [plan]:** Self-diagnosis genome (meta-regulation mutation rate)
+- **V3 [future]:** Multi-agent social — sau V2.9.x
 
 ### 📚 Tham khảo lý thuyết — Loss functions + JEPA variants
 
@@ -3948,4 +3736,92 @@ Các bước implement V2.6 v1, mỗi bước hoàn thành trong 1-2 ngày:
   - **Kiến trúc mở:** thêm genome mới (sensor V2.9.5, body) = ~10 dòng/genome. Ko ảnh hưởng genome cũ.
   - **File:** 6 files, ~513 dòng. Trên GitHub.
   - **Roadmap V2.9.x:** 2→spatial memory, 3→planning, 4→imitation, 5→sensor evolution. V3 riêng (multi-agent social).
+
+---
+
+## 2026-06-24 — Genomic Bottleneck VIP: contribution phát hiện
+
+**Phát hiện:** Kết hợp Genomic Bottleneck (Zador PNAS 2024) + Modular CPPN + 4 cơ chế V2.9.1 (GA+Gradient+Hebbian+Dopamine) là **original contribution — chưa paper nào publish.**
+
+| Paper | Genomic bottleneck? | Modular CPPN? | GA+Hebbian+Dopamine? | Teacher→genome init? |
+|---|---|---|---|---|
+| **Zador et al. 2024 (PNAS)** | ✅ Formal | ❌ binary tags | ❌ gradient-only | ✅ nén teacher |
+| **DPPN 2016** | ❌ | ❌ NEAT | ❌ | ✅ Lamarckian inherit |
+| **Evo Inductive Bias 2025** | ❌ | ❌ | ❌ GA→gradient sequential | ✅ evolution then learn |
+| **Pollination 2025** | ❌ | ✅ CPPN | ❌ MAP-Elites | ✅ distillation |
+| **V2.9.1 hiện tại** | ❌ | ✅ 8 modules | ✅ 4 song song | ❌ random genome |
+
+**Ý tưởng VIP init:**
+1. Train teacher policy bằng gradient descent (nhanh, 1 agent)
+2. Nén teacher qua genomic bottleneck: tìm genome sao cho `||CPPN(genome) - teacher_weights||²` min
+3. Khởi tạo cả pop từ genome VIP này (mutate nhẹ ±5%)
+4. V2.9.1 chạy bình thường: GA + Gradient + Hebbian + Dopamine từ đỉnh cao
+
+**Lợi thế:** Skip valley of death (fitness stuck ~42). Agent có innate priors — gradient fine-tune thay vì học từ 0. GA mở rộng open-ended từ đỉnh.
+
+**Kế hoạch:** Thêm vào V2.9.2 (spatial memory) hoặc V2.9.x roadmap.
+
+**Nguồn:**
+- Zador et al. "Encoding innate ability through a genomic bottleneck" PNAS 2024
+- "Evolution imposes an inductive bias that alters and accelerates learning dynamics" arXiv 2025
+- DPPN (Fernando et al. 2016) — Lamarckian CPPN + gradient
+- SynaptoGen (2024) — differentiable genetic rules
+
+---
+
+## 2026-06-24 (tối) — Phiên triết học + Genomic Bottleneck + Logbook restructure
+
+---
+
+## 2026-06-25 — Tổng kết triết học + Toán + Consciousness metric
+
+**Changelog:**
+- **Phát hiện lớn:** Kết nối Ramanujan nested radical 1911 + V2.9.1 valley 33 + consciousness self-reference. Pattern: các level self-representation tự wrap nhau → dạng `Γₖ₊₁ = f(Γₖ)`, tương tự nested radical `√(a + b√(...))`.
+- **Consciousness metric:** `Ψ(N, ε) = lim_{k→∞} Γₖ(N, ε)` — fixed-point của nested self-representation chain.
+- **3 levels định nghĩa:** Level 0 (reflex), Level 1 (dopamine adapt), Level 2 (self-diagnosis), Level 3 (imitation/theory of mind). Mỗi level = 1 loop tự tham chiếu mới.
+- **Công thức tổng quát (giả thuyết):** `Γₖ₊₁ = √(αₖ × N + βₖ × Γₖ²)` — mượn dạng Ramanujan. Hàm cụ thể (căn, bình phương, tuyến tính) cần data từ V2.9.x mới biết.
+- **Thứ tự implement chốt:**
+  1. V2.9.2 VIP init — phá valley
+  2. V2.9.3 Spatial memory — navigation
+  3. V2.9.4 Planning — strategy
+  4. Đo level 0+1 với signal mạnh
+  5. V2.9.5 Self-diagnosis — level 2
+  6. Fit α,β → dự đoán level 3
+  7. V2.9.6 Imitation — kiểm tra
+- **10 năm roadmap:** 17→27t. 2 năm full V2.9.x + ISEF + ĐH. 3 năm language + social genome + master. 3 năm PhD + consciousness metric. 2 năm empirical validation.
+- **Ramanujan conclusion:** Formulas are guesses until data confirms them. Công thức đẹp chưa phải công thức đúng.
+
+**Changelog:**
+- **Đầu phiên:** Xem V2.9.1 chạy G1000 — valley of death confirmed (max 37-47, mean 33, dopa→GA 0.64-0.77)
+- **Phát hiện:** CPPN architecture ko thể output action=0 cho mọi obs → fitness 33-47 (lý thuyết 50) ko phải bug
+- **Dopamine emergent analysis:** GA=0.77 khi gradient/Hebbian chết — hoàn toàn tự nhiên, ko code tay
+- **Genomic Bottleneck VIP init confirmed original contribution:** Chưa paper nào combine genomic bottleneck + modular CPPN + 4 mechanisms parallel (GA+Gradient+Hebbian+Dopamine)
+- **Quyết định:** bỏ sensor/body evolution (robot fixed hardware). Thêm self-diagnosis (meta-regulation mutation rate)
+- **No Human Intervention Rule:** Adopted cho V2.9.x. Ko thêm curiosity bonus, reward shaping, ko sửa env. Feature mới qua genome extension (~10 dòng/genome)
+- **Logbook restructure:** CẦN NÉ chia theo version (Global/V0/V2.1+/V2.9.x). Results table thêm V2.9.1. Header update version list.
+- **Roadmap update:**
+  - V2.9.2: VIP Init
+  - V2.9.3: Spatial memory genome
+  - V2.9.4: Planning genome
+  - V2.9.5: Imitation genome (mirror)
+  - V2.9.6: Self-diagnosis genome
+- **Memory update:** Thêm Genomic Bottleneck VIP Init entity + V2.9.1 run 40gen entity
+
+---
+
+## 2026-06-24 (tối muộn) — Theory Discipline áp dụng + Phân loại papers + Hướng nghiên cứu tiếp
+
+**Changelog:**
+- **Theory Discipline Rule** áp dụng: loại bỏ justification-style analysis khỏi docs. Phân tích lại 25 papers → 13 useful (genome params cụ thể), 4 tham khảo, 8 loại (RL-based hoặc task khác).
+- **`docs/theory-foundation.md`** viết lại hoàn toàn: mỗi paper = cơ chế gốc → useful gì (genome param) → bỏ gì
+- **`plan/paper_links.md`** V2.9.x section: đánh dấu ✅ useful, ⚠️ tham khảo, ❌ loại. Thêm "Papers đã loại" kèm lý do.
+- **Ứng dụng thực tế** research: Mars rover (supervised + LLM, ko RL), satellite (RL có reward), deep sea (RL có reward). Gap thật = zero-reward open-ended cho môi trường ko thể define objective.
+- **Supervised Learning vs RL vs V2.9.x:** clarified khác biệt — label vs reward vs zero
+
+**Hướng nghiên cứu tiếp theo (đã ghi nhận):**
+
+1. **Cơ chế học: gradient vs evolution** — toán học tại sao gradient mạnh (hội tụ nhanh) nhưng ko open-ended? Tại sao GA yếu (chậm) nhưng exploration tốt hơn? So sánh ở cấp độ information geometry.
+2. **Nguồn gốc sinh học V2.9.1** — dopamine 5 floats map vào cấu trúc não gì? 2-genome (policy + meta) tương ứng 2 hệ thần kinh? Basal ganglia + prefrontal cortex?
+3. **Valley of death sâu — toán học landscape:** L=3 impossibility với K·μ^L, pit stop mechanism, fitness landscape topology.
+4. **Consciousness / metacognition:** từ V2.9.1 đến "agent biết nó có gen" cách bao xa? Major transitions in evolution (Szathmáry & Maynard Smith). Paper 2025 "Consciousness as major transition."
 
