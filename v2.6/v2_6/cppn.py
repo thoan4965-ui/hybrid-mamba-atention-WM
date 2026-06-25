@@ -1,4 +1,4 @@
-"""CPPN: policy + prediction + modular (8 modules) + dopamine + regulatory gating."""
+"""CPPN: policy + prediction + modular (8 modules) + dopamine + regulatory + spatial encoding."""
 import jax, jax.numpy as jnp
 from jax import lax, vmap, jit
 
@@ -35,6 +35,26 @@ def _sub():
     return ih, ho, pred, dopa
 
 SI, SH, SP, SD = _sub()
+
+def grid_encoding(x, y, scale=1.0):
+    """Grid cell encoding from (x,y). 3 orientations × 10 phases = 30 dim."""
+    ang = jnp.array([0., jnp.pi/3, 2*jnp.pi/3])[:, None]
+    ph_x = x * jnp.cos(ang) * scale
+    ph_y = y * jnp.sin(ang) * scale
+    return jnp.sin(ph_x + ph_y).ravel()
+
+def place_encoding(x, y, n_places=16):
+    """Simple place cell encoding. 16 fixed grid positions."""
+    xs = jnp.linspace(-20., 20., 4)
+    ys = jnp.linspace(-20., 20., 4)
+    gx, gy = jnp.meshgrid(xs, ys)
+    d = (x - gx.ravel())**2 + (y - gy.ravel())**2
+    return jnp.exp(-d / (2 * 4.**2))
+
+def spatial_encoding(x, y, scale=1.0):
+    """Combined grid + place encoding: 30 + 16 = 46 dim."""
+    return jnp.concatenate([grid_encoding(x, y, scale),
+                            place_encoding(x, y)])
 
 @jit
 def genome_to_policy(nodes, conns, regs=None):

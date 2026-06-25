@@ -143,3 +143,63 @@ def regs_module_enable(regs):
 def regs_module_rate(regs):
     """Next 8 floats: sigmoid → per-module mutation rate scale [0.1, 2.0]."""
     return 0.1 + 1.9 * jax.nn.sigmoid(regs[:, REG_MOD_DIM:])
+
+# === Spatial Memory — genome phụ cho V2.9.3 (8 floats) ===
+SPATIAL_DIM = 8
+
+def init_spatial(key, pop_size):
+    return random.normal(key, (pop_size, SPATIAL_DIM)) * 0.5
+
+@jit
+def mutate_spatial(sp, key, noise=0.3):
+    return sp + noise * random.normal(key, sp.shape)
+
+@jit
+def crossover_spatial(s1, s2, key):
+    pick = random.bernoulli(key, shape=(SPATIAL_DIM,))
+    return jnp.where(pick, s1, s2)
+
+# === Planning — genome phụ cho V2.9.4 (4 floats) ===
+PLAN_DIM = 4
+
+def init_plan(key, pop_size):
+    return random.normal(key, (pop_size, PLAN_DIM)) * 0.5
+
+@jit
+def mutate_plan(pl, key, noise=0.3):
+    return pl + noise * random.normal(key, pl.shape)
+
+@jit
+def crossover_plan(p1, p2, key):
+    pick = random.bernoulli(key, shape=(PLAN_DIM,))
+    return jnp.where(pick, p1, p2)
+
+# === Self-Diagnosis — genome phụ cho V2.9.5 (3 floats) ===
+DIAG_DIM = 3
+
+def init_diag(key, pop_size):
+    return random.normal(key, (pop_size, DIAG_DIM)) * 0.5
+
+@jit
+def mutate_diag(dg, key, noise=0.3):
+    return dg + noise * random.normal(key, dg.shape)
+
+@jit
+def crossover_diag(d1, d2, key):
+    pick = random.bernoulli(key, shape=(DIAG_DIM,))
+    return jnp.where(pick, d1, d2)
+
+# === Mirror / Imitation — genome phụ cho V2.9.6 (4 floats) ===
+MIRROR_DIM = 4
+
+def init_mirror(key, pop_size):
+    return random.normal(key, (pop_size, MIRROR_DIM)) * 0.5
+
+@jit
+def mutate_mirror(mr, key, noise=0.3):
+    return mr + noise * random.normal(key, mr.shape)
+
+@jit
+def crossover_mirror(m1, m2, key):
+    pick = random.bernoulli(key, shape=(MIRROR_DIM,))
+    return jnp.where(pick, m1, m2)
