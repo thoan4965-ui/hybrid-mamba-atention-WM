@@ -62,10 +62,10 @@ SI_SPAT_END = SI_H + SI_SPAT
 SI_THOUGHT_END = SI_H + SI_SPAT + SI_THOUGHT
 
 def grid_encoding(x, y, scale=1.0):
-    ang = jnp.array([0., jnp.pi/3, 2*jnp.pi/3])[:, None]
-    ph_x = x * jnp.cos(ang) * scale
-    ph_y = y * jnp.sin(ang) * scale
-    return jnp.sin(ph_x + ph_y).ravel()
+    ang = jnp.array([0., jnp.pi/3, 2*jnp.pi/3])
+    phases = jnp.linspace(0, 2*jnp.pi, 10)
+    ph = x * jnp.cos(ang[:, None]) * scale + y * jnp.sin(ang[:, None]) * scale
+    return jnp.sin(ph + phases[None, :]).ravel()
 
 def place_encoding(x, y, n_places=16):
     xs = jnp.linspace(-20., 20., 4)
