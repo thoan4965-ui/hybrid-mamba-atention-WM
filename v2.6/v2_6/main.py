@@ -36,6 +36,8 @@ def pred_loss(w_ih, w_pred, obs, target):
 def eval_batch(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, thoughts, keys,
                flag_spatial=False, flag_planning=False, flag_diag=False, flag_mirror=False,
                flag_thought=False, elite_data=None):
+    TOKEN_DIM = 16
+
     def single(n, c, d, r, sp, pl, dg, mi, th, k):
         pol = genome_to_policy(n, c, regs=r)
         pol['w_dopa'] = d
@@ -50,37 +52,25 @@ def eval_batch(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, thoug
         mirror_lr = 0.001 + 0.009 * jax.nn.sigmoid(mi[3]) if flag_mirror else 0.
         mirror_select = 1.0 + jax.nn.sigmoid(mi[2]) if flag_mirror else 99.
 
-        # Inner speech params from thought genome
-        tok_dim = int(4 + 12 * jax.nn.sigmoid(th[0])) if flag_thought else 0
-        tok_broadcast = jax.nn.sigmoid(th[1]) if flag_thought else 0.
-        tok_listen = jax.nn.sigmoid(th[2]) if flag_thought else 0.
-        tok_temp = 0.5 + 1.5 * jax.nn.sigmoid(th[3]) if flag_thought else 1.
-        tok_decay = 0.1 + 0.9 * jax.nn.sigmoid(th[4]) if flag_thought else 0.
+        # Thought params
+        thought_scale = jax.nn.sigmoid(th[0]) * 0.5 if flag_thought else 0.
+        thought_decay = 0.1 + 0.9 * jax.nn.sigmoid(th[1]) if flag_thought else 1.
 
-        # Elite data
+        # Elite data: weight-level alignment (flattened w_ih)
         use_elite = (elite_data is not None and flag_mirror)
-        e_obs = elite_data['obs'] if use_elite else jnp.zeros(1)
-        e_act = elite_data['act'] if use_elite else jnp.zeros(1)
-        e_h = elite_data['hidden'] if use_elite else jnp.zeros(1)
+        e_wih = elite_data['wih'] if use_elite else jnp.zeros(1)
         e_fit = elite_data['fitness'] if use_elite else 0.
 
-        # Thought token state (persistent across steps within scan)
-        thought_state = jnp.zeros(tok_dim) if flag_thought else jnp.zeros(1)
-
-        def step(ps, _):
-            nonlocal thought_state
-            pol, s = ps
+        def step(carry, _):
+            pol, s, thought_state = carry
             obs_i = s.obs
 
-            # Inner speech: compute thought token, concat to obs
-            if flag_thought and tok_dim > 0:
+            # Inner speech: fixed 16-dim thought token
+            if flag_thought:
                 h = jnp.tanh(obs_i @ pol['w_ih'][:-1] + pol['w_ih'][-1])
-                # update thought with decay
-                k_t = random.fold_in(k, int(s.info['step']))
-                w_tok = random.normal(k_t, (10, tok_dim)) * tok_temp
-                new_thought = jnp.tanh(h @ w_tok)
-                thought_state = thought_state * tok_decay + new_thought * (1 - tok_decay)
-                obs_i = jnp.concatenate([obs_i, thought_state])
+                new_thought = jnp.tanh(h[:, None] * jnp.ones(TOKEN_DIM)[None, :]).mean(0)  # 16-dim from h
+                thought_state = thought_state * thought_decay + new_thought * (1 - thought_decay)
+                obs_i = jnp.concatenate([obs_i, thought_state * thought_scale])
 
             # Spatial encoding
             if flag_spatial:
@@ -107,51 +97,36 @@ def eval_batch(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, thoug
             pol['w_pred'] = pol['w_pred'] - lr_grad * w_grad * jnp.clip(g_pred, -1., 1.)
 
             for k in pol: pol[k] = jnp.nan_to_num(pol[k], 0.)
-
             pol['w_dopa'] = jnp.array([w_grad, w_hebb, w_ga, 0., 0.])
 
-            # Planning: B×L rollout
+            # Planning
             if flag_planning and B_beam > 1:
                 k_plan = random.fold_in(k, int(s2.info['step']))
                 act_noise = random.normal(k_plan, (B_beam, L_horizon, 8)) * plan_noise
                 def rollout_one(acts):
                     ss = s2; err = 0.
                     for step_i in range(L_horizon):
-                        obs_ss = ss.obs
-                        if flag_spatial:
-                            x = ss.pipeline_state.x.pos[0, 0]
-                            y = ss.pipeline_state.x.pos[0, 1]
-                            obs_ss = jnp.concatenate([obs_ss, spatial_encoding(x, y, scale=jax.nn.sigmoid(sp[0]))])
-                        _, pn = policy_forward(pol, obs_ss)
-                        ss2 = env.step(ss, acts[step_i])
-                        err += jnp.mean((ss2.obs - pn) ** 2); ss = ss2
+                        _, pn = policy_forward(pol, ss.obs)
+                        ss2 = env.step(ss, acts[step_i]); err += jnp.mean((ss2.obs - pn) ** 2); ss = ss2
                     return err
                 errs = vmap(rollout_one)(act_noise)
                 a = act_noise[jnp.argmin(errs), 0]
 
-            # Elite-based imitation: hidden state alignment
-            if use_elite and e_fit > mirror_select:
-                h_a = jnp.tanh(obs_i @ pol['w_ih'][:-1] + pol['w_ih'][-1])
-                if e_h.shape[0] > 1:
-                    # find nearest elite obs in memory
-                    d_to_elite = jnp.min(jnp.sqrt(jnp.sum((obs_i - e_obs)**2, axis=1)))
-                    if d_to_elite < 20.:  # threshold for "similar state"
-                        align_loss = mirror_lr * jnp.mean((h_a - e_h) ** 2)
-                        g_ih_align = jax.grad(
-                            lambda w: jnp.mean((jnp.tanh(obs_i @ w[:-1] + w[-1]) - e_h)**2))(pol['w_ih'])
-                        pol['w_ih'] = pol['w_ih'] - align_loss * jnp.clip(g_ih_align, -0.05, 0.05)
+            # Elite-based imitation: weight-level alignment (no obs matching)
+            if use_elite and e_fit > mirror_select and e_wih.shape[0] > 1:
+                align_loss = mirror_lr * jnp.mean((pol['w_ih'] - e_wih) ** 2)
+                pol['w_ih'] = pol['w_ih'] - jnp.clip(align_loss * (pol['w_ih'] - e_wih) * 0.01, -0.005, 0.005)
 
-            return (pol, s2), (s2.done, jnp.concatenate([obs_i, a, s2.info['energy'][None]]))
-        (pol, s_final), (d, ex) = lax.scan(step, (pol, env.reset(k)), jnp.arange(500))
+            return (pol, s2, thought_state), (s2.done, jnp.concatenate([obs_i, a, s2.info['energy'][None]]))
+        ts_init = jnp.zeros(TOKEN_DIM) if flag_thought else jnp.zeros(1)
+        (pol, s_final, final_ts), (d, ex) = lax.scan(step, (pol, env.reset(k), ts_init), jnp.arange(500))
         d = jnp.nan_to_num(d, nan=1.)
         ex = jnp.nan_to_num(ex, nan=0.)
         fd = jnp.argmax(d > 0.5)
         alive = jnp.where(jnp.any(d > 0.5), fd + 1., 500.)
         final_energy = jnp.nan_to_num(s_final.info['energy'], nan=0.)
         dopa = jnp.nan_to_num(pol['w_dopa'], 0.)
-        # Save final thought state
-        final_thought = thought_state if flag_thought else jnp.zeros(1)
-        return (alive, dopa, final_thought), jnp.concatenate([alive[None], final_energy[None], jnp.mean(ex, 0)])
+        return (alive, dopa, final_ts), jnp.concatenate([alive[None], final_energy[None], jnp.mean(ex, 0)])
     (alive_arr, dopa_arr, thought_arr), r = vmap(single)(nodes, conns, dopas, regs, spacials, plans, diags, mirrors, thoughts, keys)
     return alive_arr, dopa_arr, thought_arr, r
 
@@ -314,13 +289,9 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None,
         best_idx = jnp.argmax(f_total)
         if flag_mirror and f_total[best_idx] > elite_fitness:
             elite_fitness = float(f_total[best_idx])
-            # Record elite trajectory data
             bi = best_idx
             pol_e = genome_to_policy(state['nodes'][bi], state['conns'][bi], regs=state['regs'][bi])
-            e_obs = jnp.zeros((1, 29))  # placeholder — real trajectory would be stored in env
-            e_hidden = pol_e['w_ih'][:, :10]  # simplified: use policy weights as "hidden knowledge"
-            elite_data = {'obs': e_obs, 'act': jnp.zeros((1, 8)),
-                          'hidden': e_hidden.ravel(), 'fitness': elite_fitness}
+            elite_data = {'wih': pol_e['w_ih'], 'fitness': elite_fitness}
 
         # Self-diagnosis: adjust mutation rate
         if flag_diag:

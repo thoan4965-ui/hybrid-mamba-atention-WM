@@ -31,7 +31,9 @@ def mutate(nodes, conns, key, innov_start, subst=0.1, ins=0.03, dele=0.02):
         nn = jnp.where(jnp.isnan(n[i]), jnp.nan, n[i])
         cc = jnp.where(jnp.isnan(c[i]), jnp.nan, c[i])
         sm = random.uniform(k1, (MAX_GENES,)) < subst
-        nn += (sm * random.normal(k2, (MAX_GENES,)) * 0.05)[:, None] * (jnp.arange(NODE_PARAMS) == 5)[None, :]
+        # Mutate both expr (col5) and weight (col6) on nodes
+        wt_mask = (jnp.arange(NODE_PARAMS) == 5) | (jnp.arange(NODE_PARAMS) == 6)
+        nn += (sm * random.normal(k2, (MAX_GENES,)) * 0.05)[:, None] * wt_mask[None, :]
         cc += (sm * random.normal(k3, (MAX_GENES,)) * 0.1)[:, None] * (jnp.arange(CONN_PARAMS) == 3)[None, :]
         # Non-coding: mutate expr (column 5 for nodes, column 5 for conns)
         sm_expr = random.uniform(k1, (MAX_GENES,)) < 0.02
