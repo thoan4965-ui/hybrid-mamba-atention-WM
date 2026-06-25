@@ -5,14 +5,14 @@ from brax.envs import ant
 
 class NoRewardAnt(ant.Ant):
     def __init__(self, energy_init=20., energy_cost=0.4, torque_cost=0.05,
-                 food_energy=50, arena=20., **kw):
+                 food_energy=50, arena=20., radii=None, **kw):
         super().__init__(**kw)
         self._e_init = energy_init; self._e_cost = energy_cost
         self._t_cost = torque_cost; self._f_energy = food_energy
         self._arena = arena
         self._n_rings = 3; self._n_per_ring = 2
         self._n_food = self._n_rings * self._n_per_ring
-        self._radii = jnp.array([5., 10., 15.])
+        self._radii = jnp.array(radii) if radii else jnp.array([5., 10., 15.])
 
     def reset(self, rng):
         s = super().reset(rng)

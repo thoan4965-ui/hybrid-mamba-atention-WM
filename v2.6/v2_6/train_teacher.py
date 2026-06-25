@@ -1,11 +1,13 @@
-"""Teacher: gradient + curiosity. JIT-compiled rollout via lax.scan."""
+"""Teacher: gradient + curiosity. Teacher env: easier for movement learning (low torque, high energy, close food). GA env stays hard."""
 import jax, jax.numpy as jnp
 jax.config.update('jax_default_matmul_precision', 'high')
 from jax import random, jit, lax
 from v2_6.cppn import policy_forward
 from v2_6.env_ant import NoRewardAnt
 
-env = NoRewardAnt(backend='mjx', energy_init=20., energy_cost=0.4, torque_cost=0.05)
+# Teacher env: easier to encourage movement. Low torque, high energy, close food.
+env = NoRewardAnt(backend='mjx', energy_init=30., energy_cost=0.4, torque_cost=0.02,
+                  food_energy=50, arena=20., radii=[3., 6., 9.])
 if hasattr(env, 'sys') and hasattr(env.sys, 'mj_model'):
     env.sys.mj_model.opt.iterations = 3
     env.sys.mj_model.opt.ls_iterations = 5
@@ -24,7 +26,7 @@ def teacher_loss(params, obs_seq, action_seq, next_obs_seq):
     h = jnp.tanh(obs_seq @ params['w_ih'][:-1] + params['w_ih'][-1])
     pred_next = h @ params['w_pred']
     pred_err = jnp.mean((next_obs_seq - pred_next) ** 2)
-    curiosity = -0.20 * (jnp.var(jnp.tanh(h @ params['w_ho'])) + jnp.var(action_seq))
+    curiosity = -0.50 * (jnp.var(jnp.tanh(h @ params['w_ho'])) + jnp.var(action_seq))
     return pred_err + curiosity
 
 @jit
