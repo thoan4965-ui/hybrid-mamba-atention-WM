@@ -1,11 +1,10 @@
-"""Teacher: gradient + curiosity. Train policy in same env, same architecture."""
-import jax, jax.numpy as jnp, time
+"""Teacher: gradient + curiosity. JIT-compiled rollout via lax.scan."""
+import jax, jax.numpy as jnp
 jax.config.update('jax_default_matmul_precision', 'high')
-from jax import random, jit, vmap, grad
+from jax import random, jit, lax
 from v2_6.cppn import policy_forward
 from v2_6.env_ant import NoRewardAnt
 
-# Same env as V2.9.1
 env = NoRewardAnt(backend='mjx', energy_init=20., energy_cost=0.4, torque_cost=0.05)
 if hasattr(env, 'sys') and hasattr(env.sys, 'mj_model'):
     env.sys.mj_model.opt.iterations = 3
@@ -13,7 +12,6 @@ if hasattr(env, 'sys') and hasattr(env.sys, 'mj_model'):
     env.sys.mj_model.opt.timestep = 0.001
 
 def init_teacher(key):
-    """Init teacher policy weights (same dims as CPPN output)."""
     k1, k2, k3 = random.split(key, 3)
     return {
         'w_ih': random.normal(k1, (30, 10)) * 0.1,
@@ -23,39 +21,32 @@ def init_teacher(key):
 
 @jit
 def teacher_loss(params, obs_seq, action_seq, next_obs_seq):
-    """Loss = pred_error - β × action_entropy (curiosity)."""
-    # Predict each step
     h = jnp.tanh(obs_seq @ params['w_ih'][:-1] + params['w_ih'][-1])
     pred_next = h @ params['w_pred']
     pred_err = jnp.mean((next_obs_seq - pred_next) ** 2)
-
-    # Curiosity: estimate action distribution entropy
-    h_ho = jnp.tanh(h @ params['w_ho'])
-    action_dist = jnp.tanh(h_ho)
-    action_var = jnp.var(action_dist) + jnp.var(action_seq)
-    curiosity = -0.01 * action_var
-
+    curiosity = -0.01 * (jnp.var(jnp.tanh(h @ params['w_ho'])) + jnp.var(action_seq))
     return pred_err + curiosity
 
+@jit
 def rollout(key, params, n_steps=200):
-    """Run 1 episode, collect trajectory. Short ~200 steps for quick teacher."""
-    s = env.reset(key)
-    obs_list, act_list, nxt_list = [], [], []
-    for _ in range(n_steps):
+    """JIT-compiled rollout via lax.scan — matches GA eval_batch speed."""
+    def step(carry, _):
+        s = carry
         a, pred_n = policy_forward(params, s.obs)
         s2 = env.step(s, a)
         s2 = s2.replace(obs=jnp.nan_to_num(s2.obs, 0.))
-        obs_list.append(s.obs)
-        act_list.append(a)
-        nxt_list.append(s2.obs)
-        if s2.done > 0.5: break
-        s = s2
-    return jnp.stack(obs_list), jnp.stack(act_list), jnp.stack(nxt_list)
+        return s2, (s.obs, a, s2.obs)
+    init_state = env.reset(key)
+    _, (obs, act, nxt) = lax.scan(step, init_state, jnp.arange(n_steps))
+    return obs, act, nxt
 
 def train_teacher(n_episodes=100, lr=0.001, seed=3072):
-    """Train teacher policy with gradient + curiosity."""
+    """Train teacher policy with gradient + curiosity. ~2-3 phút cho 200 ep."""
     key = random.PRNGKey(seed)
     params = init_teacher(key)
+
+    # JIT compile rollout once (first call will compile)
+    _, _, _ = rollout(random.fold_in(key, 0), params)
 
     for ep in range(n_episodes):
         k_ep = random.fold_in(key, ep)
@@ -65,12 +56,7 @@ def train_teacher(n_episodes=100, lr=0.001, seed=3072):
         params = {k: params[k] - lr * jnp.clip(grads[k], -0.5, 0.5)
                   for k in params}
         if (ep + 1) % 20 == 0:
-            # Eval: run a clean rollout
-            _, _, _ = rollout(random.fold_in(key, ep + 9999), params)
-            alive = 0
-            for _ in range(5):
-                obs_e, _, _ = rollout(random.fold_in(key, ep + alive), params)
-                alive += obs_e.shape[0]
-            alive /= 5
-            print(f"  Teacher ep{ep+1}: loss={float(loss):.4f} avg_steps={alive:.0f}")
+            obs_e, _, _ = rollout(random.fold_in(key, ep + 9999), params)
+            avg_steps = float(obs_e.shape[0])
+            print(f"  Teacher ep{ep+1}: loss={float(loss):.4f} avg_steps={avg_steps:.0f}")
     return params

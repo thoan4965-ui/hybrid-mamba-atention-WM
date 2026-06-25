@@ -87,6 +87,7 @@ def genome_to_policy(nodes, conns, regs=None):
     return {'w_ih': w_ih / n_active, 'w_ho': w_ho / n_active,
             'w_pred': w_pred / n_active, 'w_dopa': w_dopa / n_active}
 
+@jit
 def policy_forward(params, obs):
     h = jnp.tanh(obs @ params['w_ih'][:-1] + params['w_ih'][-1])
     action = jnp.tanh(h @ params['w_ho'])
