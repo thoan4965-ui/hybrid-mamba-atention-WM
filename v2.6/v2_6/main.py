@@ -45,7 +45,8 @@ def make_eval_batch(flag_spatial=False, flag_planning=False, flag_diag=False, fl
             pol['w_dopa'] = d
             d0 = d
 
-            # Planning: fixed shapes B_MAX×L_MAX, mask unused
+            # Planning: stride + noise from genome
+            plan_stride = int(1 + 19 * jax.nn.sigmoid(pl[3])) if flag_planning else 1
             plan_noise = 0.1 + 0.4 * jax.nn.sigmoid(pl[2]) if flag_planning else 0.
 
             # Mirror params
@@ -61,7 +62,7 @@ def make_eval_batch(flag_spatial=False, flag_planning=False, flag_diag=False, fl
             e_wih = elite_data[0] if use_elite else jnp.zeros(1)
             e_fit = elite_data[1] if use_elite else 0.
 
-            def step(carry, _):
+            def step(carry, step_count):
                 pol, s, thought_state = carry
                 obs_i = s.obs  # always 29-dim from env
 
@@ -102,10 +103,11 @@ def make_eval_batch(flag_spatial=False, flag_planning=False, flag_diag=False, fl
                 for key in pol: pol[key] = jnp.nan_to_num(pol[key], 0.)
                 pol['w_dopa'] = jnp.array([w_grad, w_hebb, w_ga, 0., 0.])
 
-                # Planning: fixed B_MAX×L_MAX with masking
-                if flag_planning:
+                # Planning: rollout only every `plan_stride` steps (JIT-safe: use jnp)
+                if flag_planning and plan_stride > 1:
                     k_plan = random.fold_in(k, s2.info['step'].astype(jnp.int32))
                     acts = random.normal(k_plan, (B_MAX, L_MAX, 8)) * plan_noise
+                    do_plan = (step_count % plan_stride == 0)
                     def rollout_one(acts_seq):
                         ss = s2; err = 0.
                         for step_i in range(L_MAX):
@@ -113,7 +115,8 @@ def make_eval_batch(flag_spatial=False, flag_planning=False, flag_diag=False, fl
                             ss2 = env.step(ss, acts_seq[step_i]); err += jnp.mean((ss2.obs - pn) ** 2); ss = ss2
                         return err
                     errs = vmap(rollout_one)(acts)
-                    a = acts[jnp.argmin(errs), 0]
+                    planned_a = acts[jnp.argmin(errs), 0]
+                    a = jnp.where(do_plan, planned_a, a)
 
                 # Elite imitation: weight-level alignment (jnp.where gate, JIT-safe)
                 elite_cond = (e_fit > mirror_select) & (e_wih.shape[0] > 1)
