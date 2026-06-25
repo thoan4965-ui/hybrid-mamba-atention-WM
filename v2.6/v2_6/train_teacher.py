@@ -24,7 +24,7 @@ def teacher_loss(params, obs_seq, action_seq, next_obs_seq):
     h = jnp.tanh(obs_seq @ params['w_ih'][:-1] + params['w_ih'][-1])
     pred_next = h @ params['w_pred']
     pred_err = jnp.mean((next_obs_seq - pred_next) ** 2)
-    curiosity = -0.01 * (jnp.var(jnp.tanh(h @ params['w_ho'])) + jnp.var(action_seq))
+    curiosity = -0.20 * (jnp.var(jnp.tanh(h @ params['w_ho'])) + jnp.var(action_seq))
     return pred_err + curiosity
 
 @jit
