@@ -560,6 +560,29 @@ if __name__ == "__main__":
                 print("  VIP genome uploaded to HF", flush=True)
         except Exception as e:
             print(f"  Warning: HF upload failed: {e}", flush=True)
+    elif mode == "extract":
+        # GA-as-teacher: run short GA, extract best genome → VIP init
+        print(f"GA teacher: {n_gen}gen x {pop_size}pop, extracting best genome...")
+        result = run(n_gen=n_gen, pop_size=pop_size, seed=seed)
+        nodes_np = np.array(result['best_nodes'])
+        conns_np = np.array(result['best_conns'])
+        # Ensure 2D shape (MAX_GENES, NODE_PARAMS) even if squeeze needed
+        if nodes_np.ndim == 3: nodes_np = nodes_np[0]
+        if conns_np.ndim == 3: conns_np = conns_np[0]
+        np.savez("vip_genome.npz", nodes=nodes_np[None, ...], conns=conns_np[None, ...])
+        print(f"  VIP genome saved (fitness={result['best_fitness']:.0f})", flush=True)
+        # Upload to HF
+        try:
+            hf_token = os.environ.get("HF_TOKEN")
+            if hf_token:
+                from huggingface_hub import HfApi
+                hf_api = HfApi(token=hf_token)
+                hf_api.upload_file(path_or_fileobj="vip_genome.npz",
+                                   path_in_repo="checkpoints/v2.9/run0/vip_genome.npz",
+                                   repo_id="hhian/checkpoints")
+                print("  VIP genome uploaded to HF", flush=True)
+        except Exception as e:
+            print(f"  Warning: HF upload failed: {e}", flush=True)
     elif mode.startswith("vip"):
         vip_path = sys.argv[5] if len(sys.argv) > 5 and not sys.argv[5].startswith('--') else "vip_genome.npz"
         run(n_gen=n_gen, pop_size=pop_size, seed=seed, vip_init=vip_path, run_id=run_id,
