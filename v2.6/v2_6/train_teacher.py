@@ -29,23 +29,26 @@ def teacher_loss(params, obs_seq, action_seq, next_obs_seq):
 
 @jit
 def rollout(key, params, n_steps=200):
-    """JIT-compiled rollout via lax.scan — matches GA eval_batch speed."""
+    """JIT-compiled rollout with done tracking."""
     def step(carry, _):
-        s = carry
+        s, done_count = carry
         a, pred_n = policy_forward(params, s.obs)
         s2 = env.step(s, a)
         s2 = s2.replace(obs=jnp.nan_to_num(s2.obs, 0.))
-        return s2, (s.obs, a, s2.obs)
+        died = s2.done > 0.5
+        done_count = jnp.where(done_count < 0, jnp.where(died, s2.info['step'].astype(jnp.float32), done_count), done_count)
+        return (s2, done_count), (s.obs, a, s2.obs)
     init_state = env.reset(key)
-    _, (obs, act, nxt) = lax.scan(step, init_state, jnp.arange(n_steps))
-    return obs, act, nxt
+    (final_state, done_step), (obs, act, nxt) = lax.scan(step, (init_state, -1.), jnp.arange(n_steps))
+    alive = jnp.where(done_step < 0, n_steps, done_step.astype(jnp.int32))
+    return obs[:alive], act[:alive], nxt[:alive]
 
 def train_teacher(n_episodes=500, lr=0.001, seed=3072):
-    """Train teacher policy with gradient + curiosity. ~7 phút cho 500 ep."""
+    """Train teacher policy with gradient + curiosity."""
     key = random.PRNGKey(seed)
     params = init_teacher(key)
 
-    # JIT compile rollout once (first call will compile)
+    # JIT compile rollout once
     _, _, _ = rollout(random.fold_in(key, 0), params)
 
     for ep in range(n_episodes):

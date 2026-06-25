@@ -2,7 +2,7 @@
 import jax, jax.numpy as jnp
 from jax import random, jit, vmap, lax, nn
 
-MAX_GENES = 100; NODE_PARAMS = 8; CONN_PARAMS = 8; TAG_DIM = 16
+MAX_GENES = 200; NODE_PARAMS = 8; CONN_PARAMS = 8; TAG_DIM = 16
 
 def init_pop(key, pop_size=128):
     nodes = jnp.full((pop_size, MAX_GENES, NODE_PARAMS), jnp.nan)

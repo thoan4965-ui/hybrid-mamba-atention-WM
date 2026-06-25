@@ -480,7 +480,8 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None, r
 
         if (g + 1) % 20 == 0:
             dt = time.time() - t0; eta = dt/(g-gen_start+1)*(n_gen-g-1)/60
-            n_active = int(jnp.sum(jax.nn.sigmoid(state['regs'][:4, :8]) > 0.5).mean())
+            # Sample 32 agents for mod count (statistically stable)
+            n_active = int(jnp.sum(jax.nn.sigmoid(state['regs'][:32, :8]) > 0.5).mean())
             print(f"G{g+1}: max={curve[-1][0]:.0f} mean={curve[-1][1]:.0f}"
                   f" rmx={float(jnp.max(f)):.0f} rmn={float(jnp.mean(f)):.0f}"
                   f" ae={ae_loss:.4f} dopa={dopa_mean[0]:.2f}/{dopa_mean[1]:.2f}/{dopa_mean[2]:.2f}"
