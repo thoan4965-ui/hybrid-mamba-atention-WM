@@ -1,6 +1,6 @@
 """V2.9.x — GA + Gradient + Hebbian + Dopamine + Regulatory + Spatial + Planning + Diagnosis + Imitation.
    Feature flags: --spatial, --planning, --diagnosis, --imitation (mode=vip or mode=base)."""
-import jax, jax.numpy as jnp, time, numpy as np, os
+import jax, jax.numpy as jnp, time, numpy as np, os, glob
 jax.config.update('jax_default_matmul_precision', 'high')
 from jax import random, jit, vmap, lax
 from v2_6.genome import (init_pop, mutate, crossover_innov, mutate_tags,
@@ -231,6 +231,18 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None, r
     # Create eval_batch with flags as closure (JIT-safe)
     eval_batch_fn = make_eval_batch(flag_spatial, flag_planning, flag_diag, flag_mirror, flag_thought)
 
+    # Auto-resume: ưu tiên checkpoint run_id này trước VIP init
+    if not resume_path:
+        chk_local = sorted(glob.glob(f"checkpoints/v2.9/run{run_id}/cp_*.npz"))
+        if chk_local:
+            resume_path = chk_local[-1]
+            print(f"  Auto-resume from local: {resume_path}", flush=True)
+        elif hf_api:
+            hf_chk = download_latest_hf(hf_api, "hhian/checkpoints", run_id=run_id)
+            if hf_chk:
+                resume_path = hf_chk
+                print(f"  Auto-resume from HF ({run_subdir})", flush=True)
+
     loaded = False
     if resume_path:
         if os.path.exists(resume_path):
@@ -445,8 +457,9 @@ def run(n_gen=5000, pop_size=1024, seed=3072, resume_path=None, vip_init=None, r
         thc = thc.at[0::2].set(cth_batch(state['thoughts'][p1_arr], state['thoughts'][p2_arr], ksp_arr))
         thc = thc.at[1::2].set(cth_batch(state['thoughts'][p2_arr], state['thoughts'][p1_arr], kpl_arr))
 
-        # Lamarkian tag delta
-        td_arr = vmap(lambda p1, p2: jnp.tile(nt[p1] - nt[p2], 7)[:MAX_GENES])(p1_arr, p2_arr)
+        # Lamarkian tag delta (bền vững: ceiling division cho mọi MAX_GENES)
+        n_tiles = -(-MAX_GENES // TAG_DIM)  # ceil(200/16)=13, tự động với mọi MAX_GENES
+        td_arr = vmap(lambda p1, p2: jnp.tile(nt[p1] - nt[p2], n_tiles)[:MAX_GENES])(p1_arr, p2_arr)
         delta = jnp.zeros((np2, MAX_GENES, NODE_PARAMS)).at[:, :, 5].set(0.01 * td_arr)
         cn = cn.at[0::2].set(cn[0::2] + delta)
         cn = cn.at[1::2].set(cn[1::2] + delta)
