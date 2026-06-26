@@ -3938,3 +3938,32 @@ Mỗi bug gồm: triệu chứng → root cause → fix. Dùng để tra cứu k
 # RULE 6: Scan output array > carry scalar cho tracking
 # Sai: carry done_flag scalar → collap
 # Đúng: scan output done array → argmax works
+```
+
+---
+
+## 2026-06-25 (cuối phiên) — Tổng kết + note để suy nghĩ lại
+
+**Trạng thái hiện tại:**
+- V2.9.x code complete: ~1040 dòng, 8 files, 7 genomes, 12 cells test pass
+- 23 bugs đã fix, 6 JAX rules, Engineering Discipline generalized vào 15 skills
+- Teacher gradient và GA extract đều gặp vấn đề: gradient stuck valley 49, GA 30 phút cho fitness ~55
+- PPO teacher 30s được đề xuất nhưng chưa implement
+
+**Vấn đề cốt lõi chưa giải quyết:**
+1. GA chậm hơn RL 50-250× trên cùng env Ant. Đây là physical constraint — no free lunch.
+2. Env Ant quá nhỏ — RL giải quyết trong phút, GA cần giờ. GA advantage chỉ hiện trên env động, multi-task — nhưng env động càng lớn, GA càng chậm.
+3. "Tăng tốc GA" = holy grail của evolutionary computation. PhD-level problem. Ko có solution đơn giản.
+4. Toán học cho consciousness metric Ψ(N, ε) còn sơ khai — mới có giả thuyết nested radical, cần data từ 4 N values để fit.
+
+**Giá trị thật của dự án:**
+- 2-genome architecture + dopamine emergence — novelty thật
+- Level 2 self-diagnosis — chưa ai genome-hóa metacognition
+- Ψ(N, ε) metric — nếu confirm, là 1 con số cho consciousness của bất kỳ hệ thống nào
+- Theory Discipline rule — phát hiện justification bias của chính mình
+
+**Cần suy nghĩ lại:**
+- Có nên tiếp tục chạy 3 runs đo N → fit formula hay dừng ở phát hiện dopamine emergence + Level 2?
+- Env Ant có đủ để chứng minh khái niệm hay cần env động (multi-task, damage) cho GA thể hiện advantage?
+- PPO teacher có phá triết lý zero-reward ko? Nếu teacher là external tool, GA core vẫn zero-reward — maybe acceptable?
+- Consciousness metric Ψ(N, ε) có thể đo LLM — đó là ứng dụng lớn nhất. Nhưng cần proof-of-concept từ V2.9.x trước.
